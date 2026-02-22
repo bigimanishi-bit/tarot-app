@@ -1,0 +1,413 @@
+// app/new/page.tsx
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabaseClient";
+
+const GEN_ENDPOINTS = ["/api/readings/generate", "/api/generate", "/api/reading/generate"];
+
+type SpreadKey = "rws_1" | "rws_3" | "rws_5" | "rws_7" | "celtic_10";
+type ToneKey = "warm" | "neutral" | "direct";
+
+const SPREADS: { key: SpreadKey; label: string; template: string }[] = [
+  {
+    key: "rws_1",
+    label: "1枚（いまの要点 / メッセージ）",
+    template: `【カード】\n1) （ここにカード名）\n\n【補足】\n・質問の焦点：\n・状況：`,
+  },
+  {
+    key: "rws_3",
+    label: "3枚（現状 / 課題 / アドバイス）",
+    template: `【カード】\n1) 現状：\n2) 課題：\n3) アドバイス：\n\n【補足】\n・状況：\n・望む方向：`,
+  },
+  {
+    key: "rws_5",
+    label: "5枚（表面 / 本音 / ブレーキ / 動く要因 / 近い流れ）",
+    template: `【カード】\n1) 表面：\n2) 本音：\n3) ブレーキ：\n4) 動く要因：\n5) 近い流れ：\n\n【補足】\n・状況：\n・期限感：`,
+  },
+  {
+    key: "rws_7",
+    label: "7枚（現状 / 相手 / 自分 / 障害 / 望み / 近未来 / 結論）",
+    template: `【カード】\n1) 現状：\n2) 相手：\n3) 自分：\n4) 障害：\n5) 望み：\n6) 近未来：\n7) 結論：\n\n【補足】\n・状況：\n・避けたいこと：`,
+  },
+  {
+    key: "celtic_10",
+    label: "10枚（ケルト十字：現状/障害/顕在/潜在/過去/近未来/本人/周囲/願望恐れ/結論）",
+    template: `【カード（ケルト十字）】\n1) 現状：\n2) 障害：\n3) 顕在（意識）：\n4) 潜在（無意識）：\n5) 過去：\n6) 近未来：\n7) 本人（立場/態度）：\n8) 周囲（環境/他者）：\n9) 願望/恐れ：\n10) 結論：\n\n【補足】\n・状況：\n・期限感：\n・知りたい焦点：`,
+  },
+];
+
+export default function NewReadingPage() {
+  const router = useRouter();
+
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  // 入力
+  const [title, setTitle] = useState("");
+  const [question, setQuestion] = useState("");
+  const [cardsInput, setCardsInput] = useState(""); // ✅ カード入力
+  const [spread, setSpread] = useState<SpreadKey>("rws_3");
+  const [tone, setTone] = useState<ToneKey>("warm");
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const qLen = question.trim().length;
+  const cardsLen = cardsInput.trim().length;
+
+  const canSubmit = useMemo(() => {
+    return qLen >= 2 && !isSubmitting && !!userId;
+  }, [qLen, isSubmitting, userId]);
+
+  const spreadObj = useMemo(() => SPREADS.find((s) => s.key === spread)!, [spread]);
+  const spreadLabel = spreadObj?.label ?? "";
+  const toneLabel = tone === "warm" ? "やわらかめ" : tone === "neutral" ? "ニュートラル" : "はっきりめ";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      setCheckingAuth(true);
+
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      if (cancelled) return;
+
+      if (sessionErr) {
+        setErrorMsg(sessionErr.message);
+        setCheckingAuth(false);
+        return;
+      }
+
+      const session = sessionData.session;
+      if (!session) {
+        router.push("/login?reason=not_logged_in");
+        return;
+      }
+
+      // 招待制チェック（allowlist）
+      const email = session.user.email ?? null;
+      if (!email) {
+        await supabase.auth.signOut();
+        router.push("/login?reason=no_email");
+        return;
+      }
+
+      const { data: allowed, error: allowErr } = await supabase
+        .from("allowlist")
+        .select("email")
+        .eq("email", email)
+        .single();
+
+      if (allowErr || !allowed) {
+        await supabase.auth.signOut();
+        router.push("/login?reason=invite_only");
+        return;
+      }
+
+      setUserId(session.user.id);
+      setUserEmail(email);
+      setCheckingAuth(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
+
+  async function postGenerate(payload: any) {
+    let lastErr: any = null;
+
+    for (const url of GEN_ENDPOINTS) {
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          lastErr = new Error(`POST ${url} failed: ${res.status} ${res.statusText} ${text}`);
+          continue;
+        }
+
+        return await res.json();
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+
+    throw lastErr ?? new Error("生成APIに接続できませんでした。");
+  }
+
+  function clearAll() {
+    setErrorMsg(null);
+    setTitle("");
+    setQuestion("");
+    setCardsInput("");
+    setSpread("rws_3");
+    setTone("warm");
+  }
+
+  function insertTemplate() {
+    const t = spreadObj.template;
+    // 既に何か書いてあったら「上に追記」しないで置換（迷いを減らす）
+    setCardsInput(t);
+  }
+
+  // globals.css に負けない（! で強制）
+  const inputBase =
+    "!w-full !rounded-2xl !border !border-white/15 !bg-black/40 !px-4 !py-3 !text-sm !text-white !outline-none placeholder:!text-white/40 focus:!border-white/30";
+  const textareaBase =
+    "!w-full !resize-none !rounded-2xl !border !border-white/15 !bg-black/40 !px-4 !py-3 !text-sm !leading-7 !text-white !outline-none placeholder:!text-white/40 focus:!border-white/30";
+  const selectBase =
+    "!w-full !rounded-2xl !border !border-white/15 !bg-black/40 !px-4 !py-3 !text-sm !text-white !outline-none focus:!border-white/30";
+
+  // disabledでも文字が見えるように強制
+  const primaryBtn =
+    "!rounded-2xl !bg-white !px-5 !py-3 !text-sm !font-semibold !text-black hover:!bg-white/90 disabled:!opacity-50 disabled:!cursor-not-allowed disabled:!text-black";
+  const ghostBtn =
+    "rounded-2xl border border-white/15 bg-transparent px-4 py-3 text-sm text-white/80 hover:border-white/25 hover:text-white";
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setErrorMsg(null);
+
+    if (!userId) {
+      setErrorMsg("ログイン状態が確認できませんでした。もう一度ログインしてください。");
+      return;
+    }
+    if (qLen < 2) {
+      setErrorMsg("質問をもう少しだけ具体的に書いてね（2文字以上）。");
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      const cardsTextForDb =
+        (cardsInput.trim()
+          ? cardsInput.trim()
+          : [
+              `【質問】${question.trim()}`,
+              `【スプレッド】${spreadLabel}`,
+              `【トーン】${toneLabel}`,
+            ].join("\n")) || null;
+
+      // 生成APIへ（cardsTextも渡す）
+      const genPayload = {
+        title: title.trim() || null,
+        question: question.trim(),
+        spread,
+        tone,
+        cardsText: cardsTextForDb,
+        promptName: "rws_master",
+      };
+
+      const gen = await postGenerate(genPayload);
+
+      const readingText: string =
+        gen.readingText ?? gen.text ?? gen.output ?? gen.reading ?? gen.result ?? "";
+
+      if (!readingText || typeof readingText !== "string") {
+        throw new Error("鑑定文が取得できませんでした（APIの返却形式を確認してね）");
+      }
+
+      // ✅ DBは cards_text / result_text に合わせる（extra等は使わない）
+      const insertPayload: Record<string, any> = {
+        user_id: userId,
+        title: title.trim() || null,
+        mode: tone, // もしテーブルに mode が無いなら、ここだけ消せばOK
+        cards_text: cardsTextForDb,
+        result_text: readingText,
+      };
+
+      const { data: inserted, error: insErr } = await supabase
+        .from("readings")
+        .insert(insertPayload)
+        .select("id")
+        .single();
+
+      if (insErr) throw insErr;
+
+      const newId = inserted?.id;
+      if (newId) router.push(`/read?id=${encodeURIComponent(String(newId))}`);
+      else router.push("/read");
+    } catch (err: any) {
+      setErrorMsg(err?.message ?? "エラーが発生しました。");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  return (
+    <main className="!min-h-screen !bg-black !text-white">
+      <div className="fixed right-3 top-3 z-[9999] rounded-full bg-lime-400 px-3 py-1 text-xs font-bold text-black shadow">
+        NEW v3
+      </div>
+
+      <div className="mx-auto w-full max-w-4xl px-4 py-10">
+        {/* Hero */}
+        <div className="rounded-3xl border border-white/10 bg-gradient-to-b from-white/10 to-white/5 p-6 shadow-sm sm:p-8">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">鑑定を作成</h1>
+              <p className="mt-2 text-sm text-white/70">質問＋カード（任意）→生成→保存。読みやすさ優先で“商品っぽく”。</p>
+              {userEmail ? <p className="mt-1 text-xs text-white/45">ログイン中：{userEmail}</p> : null}
+            </div>
+
+            <div className="flex gap-2">
+              <button type="button" onClick={() => router.push("/read")} className={ghostBtn}>
+                履歴
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
+          {/* Form */}
+          <section className="lg:col-span-2">
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-5 shadow-sm sm:p-7">
+              {checkingAuth ? (
+                <div className="text-sm text-white/70">ログイン確認中…</div>
+              ) : (
+                <form onSubmit={handleSubmit} className="space-y-5">
+                  {errorMsg ? (
+                    <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+                      {errorMsg}
+                    </div>
+                  ) : null}
+
+                  <div className="space-y-2">
+                    <label className="text-sm text-white/80">タイトル（任意）</label>
+                    <input
+                      value={title}
+                      onChange={(e) => setTitle(e.target.value)}
+                      placeholder="例：相手の気持ち / 仕事の流れ"
+                      className={inputBase}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="flex items-end justify-between">
+                      <label className="text-sm text-white/80">質問（必須）</label>
+                      <div className="text-xs text-white/45">{qLen}文字</div>
+                    </div>
+                    <textarea
+                      value={question}
+                      onChange={(e) => setQuestion(e.target.value)}
+                      rows={6}
+                      placeholder="例：いつから何が起きた？いま何がつらい？何を知りたい？"
+                      className={textareaBase}
+                    />
+                    <div className="rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-xs text-white/60">
+                      テンプレ：①いつから ②何が起きた ③何を知りたい（本音/課題/近い流れ）
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <label className="text-sm text-white/80">スプレッド</label>
+                      <select value={spread} onChange={(e) => setSpread(e.target.value as SpreadKey)} className={selectBase}>
+                        {SPREADS.map((s) => (
+                          <option key={s.key} value={s.key}>
+                            {s.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-sm text-white/80">文章トーン</label>
+                      <select value={tone} onChange={(e) => setTone(e.target.value as ToneKey)} className={selectBase}>
+                        <option value="warm">やわらかめ</option>
+                        <option value="neutral">ニュートラル</option>
+                        <option value="direct">はっきりめ</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* ✅ カード入力 */}
+                  <div className="space-y-2">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                      <div>
+                        <label className="text-sm text-white/80">カード入力（任意）</label>
+                        <div className="mt-1 text-xs text-white/50">
+                          引いたカードをそのまま書ける。未入力でも動くけど、入れると精度が上がる。
+                        </div>
+                      </div>
+
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={insertTemplate}
+                          className="rounded-2xl border border-white/15 bg-black/30 px-4 py-2 text-xs text-white/85 hover:border-white/25"
+                        >
+                          テンプレ挿入
+                        </button>
+                        <div className="text-xs text-white/45 self-center">{cardsLen}文字</div>
+                      </div>
+                    </div>
+
+                    <textarea
+                      value={cardsInput}
+                      onChange={(e) => setCardsInput(e.target.value)}
+                      rows={10}
+                      placeholder="例：\n【カード】\n1) 現状：\n2) 課題：\n3) アドバイス："
+                      className={textareaBase}
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <button type="submit" disabled={!canSubmit} className={primaryBtn}>
+                      {isSubmitting ? "生成して保存中…" : "鑑定を生成して保存"}
+                    </button>
+
+                    <div className="flex gap-3">
+                      <button type="button" onClick={clearAll} className={ghostBtn}>
+                        クリア
+                      </button>
+                      <button type="button" onClick={() => router.push("/read")} className={ghostBtn}>
+                        履歴へ
+                      </button>
+                    </div>
+                  </div>
+                </form>
+              )}
+            </div>
+          </section>
+
+          {/* Sidebar */}
+          <aside className="lg:col-span-1">
+            <div className="space-y-4">
+              <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+                <div className="text-sm font-semibold">今回の設定</div>
+                <div className="mt-3 space-y-2 text-sm text-white/75">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="text-white/45">スプレッド</div>
+                    <div className="text-right">{spreadLabel}</div>
+                  </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="text-white/45">トーン</div>
+                    <div className="text-right">{toneLabel}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+                <div className="text-sm font-semibold">使い方のコツ</div>
+                <div className="mt-3 text-xs text-white/65 space-y-2">
+                  <div>・カード欄は「テンプレ挿入」→ そこにカード名を埋めるだけでOK</div>
+                  <div>・重い相談ほど、質問は「いま何がつらい / 何を知りたい」を入れると強い</div>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </main>
+  );
+}
