@@ -1,8 +1,9 @@
+// app/new/page.tsx
 "use client";
 
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { OccultShell } from "../components/OccultShell";
 
@@ -143,7 +144,10 @@ export default function NewPage() {
       setUserEmail(email);
       setCheckingAuth(false);
 
-      const { data: deckRows } = await supabase.from("deck_library").select("key, name").order("name", { ascending: true });
+      const { data: deckRows } = await supabase
+        .from("deck_library")
+        .select("key, name")
+        .order("name", { ascending: true });
 
       const list = (deckRows ?? []) as DeckRow[];
       setDecks(list);
@@ -189,24 +193,14 @@ export default function NewPage() {
 
   return (
     <OccultShell maxWidth="max-w-6xl">
-      <div className="mb-5 flex items-center justify-end gap-2">
-        <Link href="/chat" className="pill rounded-full px-4 py-2 text-xs text-white/80 hover:text-white">
-          Chat ＞
-        </Link>
-        <Link href="/read" className="pill rounded-full px-4 py-2 text-xs text-white/80 hover:text-white">
-          履歴 ＞
-        </Link>
-        <button type="button" onClick={logout} className="pill rounded-full px-4 py-2 text-xs text-white/80 hover:text-white">
-          ログアウト
-        </button>
-      </div>
+      {/* ✅ 枠外の上部バーは“無し”に統一（ここには何も置かない） */}
 
       <div className="goldEdge glass rounded-[28px] p-5 sm:p-7">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="flex items-center gap-3">
               <span className="rounded-full border border-white/15 bg-black/25 px-4 py-2 text-[11px] tracking-[.18em] text-white/80">
-                COSMIC TAROT
+                Tarot Studio
               </span>
               <span className="text-[12px] text-white/45">New</span>
             </div>
@@ -217,11 +211,14 @@ export default function NewPage() {
             </div>
           </div>
 
-          {/* ✅ ボタン整理：被りを消して短く */}
+          {/* ✅ 操作ボタンは枠内に集約 */}
           <div className="flex flex-wrap items-center gap-2">
             <button type="button" onClick={startChat} className="btn btnGold rounded-2xl px-5 py-3 text-sm font-semibold">
               Chatへ
             </button>
+            <Link href="/read" className="btn rounded-2xl px-5 py-3 text-sm text-white/90">
+              履歴
+            </Link>
             <button type="button" onClick={copyDraft} className="btn rounded-2xl px-5 py-3 text-sm text-white/90">
               コピー
             </button>
@@ -315,11 +312,13 @@ export default function NewPage() {
                 />
               </div>
 
-              {/* ✅ 下のボタンも被り消し */}
               <div className="mt-4 flex flex-wrap gap-2">
                 <button type="button" onClick={startChat} className="btn btnGold rounded-2xl px-6 py-3 text-sm font-semibold">
                   Chatへ
                 </button>
+                <Link href="/read" className="btn rounded-2xl px-6 py-3 text-sm text-white/90">
+                  履歴
+                </Link>
                 <button type="button" onClick={copyDraft} className="btn rounded-2xl px-6 py-3 text-sm text-white/90">
                   コピー
                 </button>

@@ -1,3 +1,4 @@
+// app/read/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -48,14 +49,44 @@ export default function ReadPage() {
   }, [decks]);
 
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
+      setStatus("loading...");
+
       const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      if (cancelled) return;
+
       if (sessionErr) {
         setStatus("ERROR session: " + sessionErr.message);
         return;
       }
-      if (!sessionData.session) {
+      const session = sessionData.session;
+      if (!session) {
         router.push("/login?reason=not_logged_in");
+        return;
+      }
+
+      const email = session.user.email ?? null;
+      if (!email) {
+        await supabase.auth.signOut();
+        router.push("/login?reason=no_email");
+        return;
+      }
+
+      // ✅ 招待制チェック
+      const { data: allowedRows, error: allowErr } = await supabase
+        .from("allowlist")
+        .select("email")
+        .eq("email", email)
+        .eq("enabled", true)
+        .limit(1);
+
+      if (cancelled) return;
+
+      if (allowErr || !allowedRows?.[0]) {
+        await supabase.auth.signOut();
+        router.push("/login?reason=invite_only");
         return;
       }
 
@@ -65,26 +96,36 @@ export default function ReadPage() {
         .eq("enabled", true)
         .order("name", { ascending: true });
 
+      if (cancelled) return;
+
       if (deckErr) {
         setStatus("ERROR deck_library: " + deckErr.message);
         return;
       }
       setDecks((deckRows ?? []) as DeckRow[]);
 
+      // ✅ readings は自分の分だけ
       const { data, error } = await supabase
         .from("readings")
         .select("id, theme, title, cards_text, result_text, created_at")
+        .eq("user_id", session.user.id)
         .order("created_at", { ascending: false })
         .limit(200);
 
+      if (cancelled) return;
+
       if (error) {
-        setStatus("ERROR: " + error.message);
+        setStatus("ERROR readings: " + error.message);
         return;
       }
 
       setRows((data ?? []) as ReadingRow[]);
       setStatus(`OK. ${data?.length ?? 0} readings`);
     })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   async function logout() {
@@ -136,8 +177,6 @@ export default function ReadPage() {
 
           --glassTop: rgba(255,255,255,.12);
           --glassBot: rgba(255,255,255,.06);
-
-          --ink: rgba(0,0,0,.55);
         }
 
         .bg{
@@ -248,28 +287,14 @@ export default function ReadPage() {
       <div className="dust" />
 
       <div className="relative z-10 mx-auto w-full max-w-6xl px-4 py-8">
-        <div className="mb-5 flex items-center justify-end gap-2">
-          <Link href="/new" className="pill rounded-full px-4 py-2 text-xs text-white/80 hover:text-white">
-            ＋ 新規鑑定
-          </Link>
-          <Link href="/read" className="pill rounded-full px-4 py-2 text-xs text-white/80 hover:text-white">
-            履歴 ＞
-          </Link>
-          <button
-            type="button"
-            onClick={logout}
-            className="pill rounded-full px-4 py-2 text-xs text-white/80 hover:text-white"
-          >
-            ログアウト
-          </button>
-        </div>
+        {/* ✅ 枠外のナビ（pills）は削除。ここには何も置かない */}
 
         <div className="goldEdge glass rounded-[28px] p-5 sm:p-7">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div className="flex items-center gap-3">
                 <span className="rounded-full border border-white/15 bg-black/25 px-4 py-2 text-[11px] tracking-[.18em] text-white/80">
-                  COSMIC TAROT
+                  Tarot Studio
                 </span>
                 <span className="text-[12px] text-white/45">History</span>
               </div>
@@ -278,6 +303,7 @@ export default function ReadPage() {
               <div className="mt-3 text-sm text-white/70">{status}</div>
             </div>
 
+            {/* ✅ 枠内だけに操作を集約（重複を消す） */}
             <div className="flex flex-wrap items-center gap-2">
               <Link href="/new" className="btn btnGold rounded-2xl px-5 py-3 text-sm font-semibold">
                 ＋ 新規鑑定
@@ -347,24 +373,7 @@ export default function ReadPage() {
               </div>
             </div>
 
-            <div className="goldEdge glass rounded-[24px] p-4">
-              <div className="text-sm font-semibold text-white/90">絞り込み</div>
-              <select
-                value={deckFilter}
-                onChange={(e) => setDeckFilter(e.target.value)}
-                className="field mt-3 w-full rounded-2xl px-4 py-3 text-sm text-white"
-              >
-                <option value="all">全デッキ</option>
-                {decks.map((d) => (
-                  <option key={d.key} value={d.key}>
-                    {d.name}
-                  </option>
-                ))}
-              </select>
-              <div className="mt-3 text-[11px] text-white/45">
-                表示：<span className="font-semibold text-white/85">{filtered.length}</span> 件
-              </div>
-            </div>
+            {/* ✅ 左下「絞り込み（select）」は削除（ショートカットと被る） */}
           </aside>
 
           <section className="lg:col-span-3">
@@ -415,7 +424,6 @@ export default function ReadPage() {
 
                         <h2 className="mt-3 text-lg sm:text-xl font-semibold tracking-tight text-white/95">{title}</h2>
 
-                        {/* ✅ 一覧はプレビューだけ（軽量化） */}
                         {result ? (
                           <div className="mt-3 text-sm leading-relaxed text-white/85">
                             {shortPreview(result, 220)}
@@ -424,7 +432,6 @@ export default function ReadPage() {
                           <div className="mt-3 text-sm text-white/60">鑑定結果がありません</div>
                         )}
 
-                        {/* payload は必要な時だけ開く */}
                         {opened && r.cards_text ? (
                           <div className="reading mt-4 rounded-2xl p-4">
                             <div className="mb-2 text-[11px] font-semibold tracking-widest text-white/60">

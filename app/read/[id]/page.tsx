@@ -202,11 +202,6 @@ export default function ReadDetailPage() {
           border: 1px solid rgba(255,255,255,.12);
         }
 
-        .pill{
-          border: 1px solid rgba(255,255,255,.16);
-          background: rgba(255,255,255,.08);
-        }
-
         .heroTitle{
           text-shadow: 0 10px 30px rgba(0,0,0,.55);
           letter-spacing: .02em;
@@ -218,28 +213,12 @@ export default function ReadDetailPage() {
       <div className="dust" />
 
       <div className="relative z-10 mx-auto w-full max-w-6xl px-4 py-8">
-        <div className="mb-5 flex items-center justify-end gap-2">
-          <Link href="/new" className="pill rounded-full px-4 py-2 text-xs text-white/80 hover:text-white">
-            ＋ 新規鑑定
-          </Link>
-          <Link href="/read" className="pill rounded-full px-4 py-2 text-xs text-white/80 hover:text-white">
-            履歴 ＞
-          </Link>
-          <button
-            type="button"
-            onClick={logout}
-            className="pill rounded-full px-4 py-2 text-xs text-white/80 hover:text-white"
-          >
-            ログアウト
-          </button>
-        </div>
-
         <div className="goldEdge glass rounded-[28px] p-5 sm:p-7">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div className="flex items-center gap-3">
                 <span className="rounded-full border border-white/15 bg-black/25 px-4 py-2 text-[11px] tracking-[.18em] text-white/80">
-                  COSMIC TAROT
+                  Tarot Studio
                 </span>
                 <span className="text-[12px] text-white/45">Reading</span>
               </div>
@@ -258,6 +237,7 @@ export default function ReadDetailPage() {
               </div>
             </div>
 
+            {/* ✅ 枠外ナビの原因だった “pill” 行は完全撤去。枠内だけに統一 */}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -266,12 +246,15 @@ export default function ReadDetailPage() {
               >
                 一覧へ
               </button>
+
               <Link href="/chat" className="btn rounded-2xl px-5 py-3 text-sm text-white/90">
                 チャットへ
               </Link>
+
               <Link href="/new" className="btn btnGold rounded-2xl px-5 py-3 text-sm font-semibold">
                 ＋ 新規鑑定
               </Link>
+
               <button type="button" onClick={logout} className="btn rounded-2xl px-5 py-3 text-sm text-white/90">
                 ログアウト
               </button>

@@ -23,6 +23,12 @@ function safeJson(v: any) {
   }
 }
 
+function getBearerToken(req: Request) {
+  const h = req.headers.get("authorization") || req.headers.get("Authorization") || "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m?.[1]?.trim() || null;
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json().catch(() => ({} as any));
@@ -45,22 +51,65 @@ export async function POST(req: Request) {
     const spread = body?.spread ?? null;
     const tone = typeof body?.tone === "string" ? body.tone : null;
 
-    // ---- Supabase client（service role があれば優先）
+    // ---- env
     const supabaseUrl = getEnv("NEXT_PUBLIC_SUPABASE_URL");
     const anonKey = getEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
     const serviceKey = getEnv("SUPABASE_SERVICE_ROLE_KEY");
 
-    const supabase =
-      supabaseUrl && (serviceKey || anonKey)
-        ? createClient(supabaseUrl, (serviceKey || anonKey) as string, {
-            auth: { persistSession: false },
-          })
-        : null;
+    if (!supabaseUrl || !anonKey || !serviceKey) {
+      return NextResponse.json({ error: "Supabase env is missing" }, { status: 500 });
+    }
+
+    // ① 認証：Bearer token 必須
+    const token = getBearerToken(req);
+    if (!token) {
+      return NextResponse.json(
+        { error: "Authorization Bearer token is required" },
+        { status: 401 }
+      );
+    }
+
+    // ② tokenからユーザー取得（anon権限でOK）
+    const authClient = createClient(supabaseUrl, anonKey, {
+      auth: { persistSession: false },
+      global: { headers: { Authorization: `Bearer ${token}` } },
+    });
+
+    const { data: userRes, error: userErr } = await authClient.auth.getUser();
+    const user = userRes?.user ?? null;
+
+    if (userErr || !user) {
+      return NextResponse.json({ error: "Invalid session" }, { status: 401 });
+    }
+
+    const user_id = user.id;
+    const email = (user.email || "").toLowerCase().trim();
+    if (!email) {
+      return NextResponse.json({ error: "email is missing on user" }, { status: 401 });
+    }
+
+    // ③ allowlist チェック（service roleで参照）
+    const admin = createClient(supabaseUrl, serviceKey, {
+      auth: { persistSession: false },
+    });
+
+    const { data: allow, error: allowErr } = await admin
+      .from("allowlist")
+      .select("enabled")
+      .eq("email", email)
+      .maybeSingle();
+
+    if (allowErr) {
+      return NextResponse.json({ error: allowErr.message }, { status: 500 });
+    }
+    if (!allow?.enabled) {
+      return NextResponse.json({ error: "Forbidden (not invited)" }, { status: 403 });
+    }
 
     // ---- deck_library から style/dictionary を拾う（あれば system に混ぜる）
     let deck: DeckRow | null = null;
-    if (supabase && deckKey) {
-      const { data } = await supabase
+    if (deckKey) {
+      const { data } = await admin
         .from("deck_library")
         .select("key,name,style_instruction,dictionary")
         .eq("key", deckKey)
@@ -116,13 +165,14 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "No output" }, { status: 500 });
     }
 
-    // ✅ readings 保存（deck_key は入れない）
-    if (supabase) {
-      await supabase.from("readings").insert({
-        cards_text: safeJson(userPayload),
-        result_text: out,
-      });
-    }
+    // ✅ readings 保存（user_id をトークン由来で固定）
+    await admin.from("readings").insert({
+      user_id,
+      theme: typeof body?.theme === "string" ? body.theme : null,
+      title: typeof body?.title === "string" ? body.title : null,
+      cards_text: safeJson(userPayload),
+      result_text: out,
+    });
 
     return NextResponse.json({ readingText: out });
   } catch (e: any) {

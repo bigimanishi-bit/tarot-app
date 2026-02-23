@@ -74,13 +74,6 @@ function buildCardsText(deckKey: string, spread: string, tone: string, msgs: Cha
   return lines.join("\n");
 }
 
-function pickLastAssistant(msgs: ChatMsg[]) {
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i].role === "assistant") return msgs[i].content;
-  }
-  return "";
-}
-
 export default function ChatPage() {
   const router = useRouter();
 
@@ -103,12 +96,62 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const [saving, setSaving] = useState(false);
+  // ✅ 自動保存の表示だけ残す（ボタンは消す）
+  const [autoSaving, setAutoSaving] = useState(false);
   const [saveOk, setSaveOk] = useState<string | null>(null);
 
   const [seedToast, setSeedToast] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  async function getAccessToken(): Promise<string> {
+    const { data, error } = await supabase.auth.getSession();
+    if (error) throw new Error(error.message);
+    const token = data.session?.access_token;
+    if (!token) throw new Error("Not authenticated");
+    return token;
+  }
+
+  async function autoSave(finalMsgs: ChatMsg[], aiText: string) {
+    // 送信後の自動保存だけにしたいので、ここでだけ保存する
+    setSaveOk(null);
+    setAutoSaving(true);
+
+    try {
+      const token = await getAccessToken();
+
+      const title = nowTitle();
+      const cards_text = buildCardsText(deckKey, spread, tone, finalMsgs);
+      const result_text = aiText;
+
+      const res = await fetch("/api/readings", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          theme: deckKey,
+          title,
+          cards_text,
+          result_text,
+        }),
+      });
+
+      const json = await res.json().catch(() => ({} as any));
+      if (!res.ok) {
+        throw new Error(json?.error ? String(json.error) : `API error: ${res.status}`);
+      }
+
+      setSaveOk("自動保存しました（履歴に反映）");
+      window.setTimeout(() => setSaveOk(null), 2200);
+    } catch (e: any) {
+      // 自動保存失敗は「送信失敗」と分ける
+      setErr(`自動保存エラー: ${e?.message ?? "save error"}`);
+    } finally {
+      setAutoSaving(false);
+    }
+  }
 
   // ✅ /new の下書きを /chat に反映（10分以内・反映できた時だけ消す）
   useEffect(() => {
@@ -155,7 +198,6 @@ export default function ChatPage() {
         timer = setTimeout(() => setSeedToast(null), 2200);
       }
     } catch {
-      // 壊れてても消して終了
       try {
         localStorage.removeItem("tarot_chat_seed");
       } catch {}
@@ -166,10 +208,7 @@ export default function ChatPage() {
     };
   }, []);
 
-  const spreadLabel = useMemo(() => {
-    return SPREADS.find((s) => s.key === spread)?.label ?? spread;
-  }, [spread]);
-
+  const spreadLabel = useMemo(() => SPREADS.find((s) => s.key === spread)?.label ?? spread, [spread]);
   const toneLabel = tone === "warm" ? "やわらかめ" : tone === "neutral" ? "ニュートラル" : "はっきりめ";
 
   useEffect(() => {
@@ -244,21 +283,27 @@ export default function ChatPage() {
 
     setSending(true);
 
-    const nextMsgs: ChatMsg[] = [...messages, { role: "user", content: q }];
-    setMessages(nextMsgs);
+    // ① 先にユーザー発言を追加
+    const userMsgs: ChatMsg[] = [...messages, { role: "user", content: q }];
+    setMessages(userMsgs);
     setText("");
 
     try {
+      const token = await getAccessToken();
+
       const res = await fetch("/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify({
           question: q,
           deckKey,
           spread,
           tone,
           promptName: "rws_master",
-          messages: nextMsgs.slice(-12),
+          messages: userMsgs.slice(-12),
         }),
       });
 
@@ -270,60 +315,17 @@ export default function ChatPage() {
       const out = (json?.readingText as string | undefined) ?? (json?.text as string | undefined) ?? "";
       if (!out) throw new Error("No output");
 
-      setMessages((prev) => [...prev, { role: "assistant", content: out }]);
+      // ② AI発言を追加（この最終配列で保存）
+      const finalMsgs: ChatMsg[] = [...userMsgs, { role: "assistant", content: out }];
+      setMessages(finalMsgs);
+
+      // ③ ✅ 送信後に自動保存（ボタンは無し）
+      await autoSave(finalMsgs, out);
     } catch (e: any) {
       setErr(e?.message ?? "error");
       setMessages((prev) => [...prev, { role: "assistant", content: `API error: ${e?.message ?? "error"}` }]);
     } finally {
       setSending(false);
-    }
-  }
-
-  async function saveReading() {
-    setErr(null);
-    setSaveOk(null);
-    if (saving) return;
-
-    const lastAi = pickLastAssistant(messages);
-    if (!lastAi) {
-      setErr("まだ鑑定結果がありません。まず送信して鑑定を出してください。");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const { data: userData, error: userErr } = await supabase.auth.getUser();
-      const user = userData?.user;
-      if (userErr || !user) {
-        throw new Error("Not authenticated");
-      }
-
-      const title = nowTitle();
-      const cards_text = buildCardsText(deckKey, spread, tone, messages);
-      const result_text = lastAi;
-
-      const res = await fetch("/api/readings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_id: user.id,
-          theme: deckKey,
-          title,
-          cards_text,
-          result_text,
-        }),
-      });
-
-      const json = await res.json().catch(() => ({} as any));
-      if (!res.ok) {
-        throw new Error(json?.error ? String(json.error) : `API error: ${res.status}`);
-      }
-
-      setSaveOk("保存しました。/read に反映します。");
-    } catch (e: any) {
-      setErr(e?.message ?? "save error");
-    } finally {
-      setSaving(false);
     }
   }
 
@@ -498,24 +500,12 @@ export default function ChatPage() {
           </div>
         ) : null}
 
-        <div className="mb-5 flex items-center justify-end gap-2">
-          <Link href="/new" className="pill rounded-full px-4 py-2 text-xs text-white/80 hover:text-white">
-            ＋ 新規鑑定
-          </Link>
-          <Link href="/read" className="pill rounded-full px-4 py-2 text-xs text-white/80 hover:text-white">
-            履歴 ＞
-          </Link>
-          <button type="button" onClick={logout} className="pill rounded-full px-4 py-2 text-xs text-white/80 hover:text-white">
-            ログアウト
-          </button>
-        </div>
-
         <div className="goldEdge glass rounded-[28px] p-5 sm:p-7">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <div className="flex items-center gap-3">
                 <span className="rounded-full border border-white/15 bg-black/25 px-4 py-2 text-[11px] tracking-[.18em] text-white/80">
-                  COSMIC TAROT
+                  Tarot Studio
                 </span>
                 <span className="text-[12px] text-white/45">Chat</span>
               </div>
@@ -536,27 +526,24 @@ export default function ChatPage() {
 
               <button
                 type="button"
-                onClick={saveReading}
-                disabled={saving}
-                className={clsx("btn btnGold rounded-2xl px-5 py-3 text-sm font-semibold", saving ? "opacity-60 cursor-not-allowed" : "")}
-              >
-                {saving ? "保存中…" : "保存"}
-              </button>
-
-              <button
-                type="button"
                 onClick={() => setMessages([{ role: "assistant", content: "チャット鑑定モード。鑑定だけ返します。" }])}
                 className="btn rounded-2xl px-5 py-3 text-sm text-white/90"
               >
                 リセット
               </button>
+
+              <button type="button" onClick={logout} className="btn rounded-2xl px-5 py-3 text-sm text-white/90">
+                ログアウト
+              </button>
             </div>
           </div>
 
           {saveOk ? (
-            <div className="mt-4 goldEdge glass rounded-[18px] p-3 text-sm text-amber-50">
-              {saveOk}
-            </div>
+            <div className="mt-4 goldEdge glass rounded-[18px] p-3 text-sm text-amber-50">{saveOk}</div>
+          ) : null}
+
+          {autoSaving ? (
+            <div className="mt-4 goldEdge glass rounded-[18px] p-3 text-sm text-white/80">自動保存中…</div>
           ) : null}
 
           <div className="mt-7 grid grid-cols-1 gap-6 lg:grid-cols-4">
@@ -664,7 +651,12 @@ export default function ChatPage() {
                       <div className="space-y-4">
                         {messages.map((m, i) => (
                           <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
-                            <div className={clsx("bubbleBase max-w-[85%] px-4 py-3 text-sm", m.role === "user" ? "bubbleUser" : "bubbleAi aiAccent")}>
+                            <div
+                              className={clsx(
+                                "bubbleBase max-w-[85%] px-4 py-3 text-sm",
+                                m.role === "user" ? "bubbleUser" : "bubbleAi aiAccent"
+                              )}
+                            >
                               <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
                             </div>
                           </div>
