@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { OccultShell } from "../components/OccultShell";
 
 type ToneKey = "warm" | "neutral" | "direct";
 type SpreadKey =
@@ -85,13 +84,20 @@ export default function NewPage() {
   const [tone, setTone] = useState<ToneKey>("direct");
 
   const [presetKey, setPresetKey] = useState(PRESETS[0].key);
-  const preset = useMemo(() => PRESETS.find((p) => p.key === presetKey) ?? PRESETS[0], [presetKey]);
+  const preset = useMemo(
+    () => PRESETS.find((p) => p.key === presetKey) ?? PRESETS[0],
+    [presetKey]
+  );
 
   const [draft, setDraft] = useState(preset.text);
   const [err, setErr] = useState<string | null>(null);
 
-  const spreadLabel = useMemo(() => SPREADS.find((s) => s.key === spread)?.label ?? spread, [spread]);
-  const toneLabel = tone === "warm" ? "やわらかめ" : tone === "neutral" ? "ニュートラル" : "はっきりめ";
+  const spreadLabel = useMemo(
+    () => SPREADS.find((s) => s.key === spread)?.label ?? spread,
+    [spread]
+  );
+  const toneLabel =
+    tone === "warm" ? "やわらかめ" : tone === "neutral" ? "ニュートラル" : "はっきりめ";
 
   useEffect(() => {
     setDraft(preset.text);
@@ -192,144 +198,238 @@ export default function NewPage() {
   }
 
   return (
-    <OccultShell maxWidth="max-w-6xl">
-      {/* ✅ 枠外の上部バーは“無し”に統一（ここには何も置かない） */}
-
-      <div className="goldEdge glass rounded-[28px] p-5 sm:p-7">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <div className="flex items-center gap-3">
-              <span className="rounded-full border border-white/15 bg-black/25 px-4 py-2 text-[11px] tracking-[.18em] text-white/80">
+    <main
+      className="min-h-screen"
+      style={{
+        backgroundImage: "url(/assets/bg-okinawa-twilight.png)",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+        backgroundAttachment: "fixed",
+      }}
+    >
+      <div className="min-h-screen bg-black/10">
+        <div className="mx-auto max-w-6xl px-6 py-10 md:py-14">
+          {/* ヘッダー（loginと同じトーン） */}
+          <header className="mb-10 md:mb-12">
+            <div className="inline-flex flex-col gap-3">
+              <h1
+                className="text-4xl md:text-6xl tracking-tight text-slate-900"
+                style={{
+                  fontFamily:
+                    'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+                }}
+              >
                 Tarot Studio
-              </span>
-              <span className="text-[12px] text-white/45">New</span>
+              </h1>
+              <p className="text-sm md:text-base text-slate-700">
+                新規鑑定（New）
+              </p>
+              <p className="text-xs md:text-sm text-slate-600">
+                {checkingAuth ? "ログイン確認中…" : userEmail ? `ログイン中：${userEmail}` : ""}
+              </p>
             </div>
+          </header>
 
-            <h1 className="heroTitle mt-4 text-2xl sm:text-3xl font-semibold">新規鑑定</h1>
-            <div className="mt-3 text-sm text-white/70">
-              {checkingAuth ? "ログイン確認中…" : userEmail ? `ログイン中：${userEmail}` : ""}
+          {/* エラー */}
+          {err ? (
+            <div className="mb-6 rounded-2xl border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">
+              {err}
             </div>
-          </div>
+          ) : null}
 
-          {/* ✅ 操作ボタンは枠内に集約 */}
-          <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={startChat} className="btn btnGold rounded-2xl px-5 py-3 text-sm font-semibold">
-              Chatへ
-            </button>
-            <Link href="/read" className="btn rounded-2xl px-5 py-3 text-sm text-white/90">
-              履歴
-            </Link>
-            <button type="button" onClick={copyDraft} className="btn rounded-2xl px-5 py-3 text-sm text-white/90">
-              コピー
-            </button>
-            <button type="button" onClick={logout} className="btn rounded-2xl px-5 py-3 text-sm text-white/90">
-              ログアウト
-            </button>
-          </div>
-        </div>
-
-        {err ? (
-          <div className="mt-5 goldEdge glass rounded-[18px] p-3 text-sm text-red-100">
-            <div className="text-red-200/90">ERROR</div>
-            <div className="mt-1 text-red-100/90">{err}</div>
-          </div>
-        ) : null}
-
-        <div className="mt-7 grid grid-cols-1 gap-6 lg:grid-cols-4">
-          <aside className="lg:col-span-1 space-y-4">
-            <div className="goldEdge glass rounded-[24px] p-4">
-              <div className="text-sm font-semibold text-white/90">テンプレ</div>
-              <div className="mt-3 space-y-2">
-                {PRESETS.map((p) => (
-                  <button
-                    key={p.key}
-                    type="button"
-                    onClick={() => setPresetKey(p.key)}
-                    className={clsx("btn w-full rounded-2xl px-3 py-3 text-left", p.key === presetKey ? "border-white/30 bg-white/10" : "")}
-                  >
-                    <div className="text-xs text-white/90 font-semibold">{p.title}</div>
-                    <div className="mt-1 text-[11px] text-white/55 leading-5">{p.desc}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="goldEdge glass rounded-[24px] p-4">
-              <div className="text-sm font-semibold text-white/90">設定</div>
-
-              <div className="mt-3 space-y-3">
-                <div>
-                  <div className="mb-2 text-xs text-white/60">デッキ</div>
-                  <select value={deckKey} onChange={(e) => setDeckKey(e.target.value)} className="field w-full rounded-2xl px-4 py-3 text-sm text-white">
-                    {decks.length === 0 ? <option value="rws">rws</option> : null}
-                    {decks.map((d) => (
-                      <option key={d.key} value={d.key}>
-                        {d.name ?? d.key}
-                      </option>
+          {/* メイン（ガラス枠：loginと同系） */}
+          <section className="rounded-[28px] border border-white/40 bg-white/18 p-4 shadow-[0_30px_90px_rgba(15,23,42,0.25)] backdrop-blur-xl md:p-6">
+            <div className="grid gap-6 lg:grid-cols-4">
+              {/* 左：テンプレ＋設定 */}
+              <aside className="lg:col-span-1 space-y-6">
+                <div className="rounded-2xl border border-white/50 bg-white/68 p-5 shadow-sm">
+                  <div className="text-sm font-bold text-slate-900">テンプレ</div>
+                  <div className="mt-3 space-y-2">
+                    {PRESETS.map((p) => (
+                      <button
+                        key={p.key}
+                        type="button"
+                        onClick={() => setPresetKey(p.key)}
+                        className={clsx(
+                          "w-full rounded-2xl border px-4 py-3 text-left shadow-sm transition",
+                          p.key === presetKey
+                            ? "border-slate-300 bg-white"
+                            : "border-slate-200 bg-white/80 hover:bg-white"
+                        )}
+                      >
+                        <div className="text-xs font-semibold text-slate-900">{p.title}</div>
+                        <div className="mt-1 text-[11px] leading-5 text-slate-600">{p.desc}</div>
+                      </button>
                     ))}
-                  </select>
+                  </div>
                 </div>
 
-                <div>
-                  <div className="mb-2 text-xs text-white/60">スプレッド</div>
-                  <select value={spread} onChange={(e) => setSpread(e.target.value as SpreadKey)} className="field w-full rounded-2xl px-4 py-3 text-sm text-white">
-                    {SPREADS.map((s) => (
-                      <option key={s.key} value={s.key}>
-                        {s.label}
-                      </option>
-                    ))}
-                  </select>
+                <div className="rounded-2xl border border-white/50 bg-white/68 p-5 shadow-sm">
+                  <div className="text-sm font-bold text-slate-900">設定</div>
+
+                  <div className="mt-4 space-y-4">
+                    <div>
+                      <div className="mb-2 text-xs font-semibold text-slate-700">デッキ</div>
+                      <select
+                        value={deckKey}
+                        onChange={(e) => setDeckKey(e.target.value)}
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none"
+                      >
+                        {decks.length === 0 ? <option value="rws">rws</option> : null}
+                        {decks.map((d) => (
+                          <option key={d.key} value={d.key}>
+                            {d.name ?? d.key}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <div className="mb-2 text-xs font-semibold text-slate-700">スプレッド</div>
+                      <select
+                        value={spread}
+                        onChange={(e) => setSpread(e.target.value as SpreadKey)}
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none"
+                      >
+                        {SPREADS.map((s) => (
+                          <option key={s.key} value={s.key}>
+                            {s.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <div className="mb-2 text-xs font-semibold text-slate-700">トーン</div>
+                      <select
+                        value={tone}
+                        onChange={(e) => setTone(e.target.value as ToneKey)}
+                        className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none"
+                      >
+                        <option value="warm">やわらかめ</option>
+                        <option value="neutral">ニュートラル</option>
+                        <option value="direct">はっきりめ</option>
+                      </select>
+                    </div>
+
+                    <div className="text-xs text-slate-600">
+                      今：
+                      <span className="font-semibold text-slate-900"> {deckKey}</span> /{" "}
+                      <span className="font-semibold text-slate-900">{spreadLabel}</span> /{" "}
+                      <span className="font-semibold text-slate-900">{toneLabel}</span>
+                    </div>
+                  </div>
                 </div>
+              </aside>
 
-                <div>
-                  <div className="mb-2 text-xs text-white/60">トーン</div>
-                  <select value={tone} onChange={(e) => setTone(e.target.value as ToneKey)} className="field w-full rounded-2xl px-4 py-3 text-sm text-white">
-                    <option value="warm">やわらかめ</option>
-                    <option value="neutral">ニュートラル</option>
-                    <option value="direct">はっきりめ</option>
-                  </select>
+              {/* 右：下書き */}
+              <section className="lg:col-span-3">
+                <div className="rounded-2xl border border-white/50 bg-white/68 p-5 shadow-sm sm:p-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="text-sm font-bold text-slate-900">下書き</div>
+                      <div className="mt-2 text-xs text-slate-600">
+                        「Chatへ」で /chat に移動します（下書きは localStorage に保存）。
+                      </div>
+                    </div>
+
+                    {/* 操作（loginと同じボタン感） */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={startChat}
+                        className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-slate-900 shadow-sm hover:bg-amber-100"
+                      >
+                        Chatへ
+                      </button>
+                      <Link
+                        href="/read"
+                        className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                      >
+                        履歴
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={copyDraft}
+                        className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                      >
+                        コピー
+                      </button>
+                      <button
+                        type="button"
+                        onClick={logout}
+                        className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                      >
+                        ログアウト
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <textarea
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      rows={14}
+                      className="w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm leading-7 text-slate-900 shadow-sm outline-none placeholder:text-slate-400"
+                      placeholder="ここに下書きを書きます"
+                    />
+                  </div>
+
+                  {/* 下にも同じ操作（スマホでも押しやすい） */}
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={startChat}
+                      className="rounded-xl border border-amber-200 bg-amber-50 px-5 py-3 text-sm font-semibold text-slate-900 shadow-sm hover:bg-amber-100"
+                    >
+                      Chatへ
+                    </button>
+                    <Link
+                      href="/read"
+                      className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                    >
+                      履歴
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={copyDraft}
+                      className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                    >
+                      コピー
+                    </button>
+                    <button
+                      type="button"
+                      onClick={logout}
+                      className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                    >
+                      ログアウト
+                    </button>
+                  </div>
                 </div>
-
-                <div className="text-xs text-white/55">
-                  今：<span className="text-white/85">{deckKey}</span> / <span className="text-white/85">{spreadLabel}</span> /{" "}
-                  <span className="text-white/85">{toneLabel}</span>
-                </div>
-              </div>
-            </div>
-          </aside>
-
-          <section className="lg:col-span-3">
-            <div className="goldEdge glass rounded-[26px] p-5 sm:p-6">
-              <div className="text-sm font-semibold text-white/90">下書き</div>
-              <div className="mt-3 text-xs text-white/55">「Chatへ」で /chat に移動します（下書きは localStorage に保存）。</div>
-
-              <div className="mt-4">
-                <textarea
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  rows={14}
-                  className="field w-full resize-none rounded-2xl px-4 py-4 text-sm leading-7 text-white placeholder:text-white/35"
-                />
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button type="button" onClick={startChat} className="btn btnGold rounded-2xl px-6 py-3 text-sm font-semibold">
-                  Chatへ
-                </button>
-                <Link href="/read" className="btn rounded-2xl px-6 py-3 text-sm text-white/90">
-                  履歴
-                </Link>
-                <button type="button" onClick={copyDraft} className="btn rounded-2xl px-6 py-3 text-sm text-white/90">
-                  コピー
-                </button>
-                <button type="button" onClick={logout} className="btn rounded-2xl px-6 py-3 text-sm text-white/90">
-                  ログアウト
-                </button>
-              </div>
+              </section>
             </div>
           </section>
+
+          <div className="h-10" />
         </div>
       </div>
-    </OccultShell>
+    </main>
+  );
+}
+
+function Benefit({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white/85 p-4">
+      <div className="flex items-start gap-3">
+        <span className="mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded-full border border-amber-200 bg-amber-50 text-xs font-bold text-amber-700">
+          ✓
+        </span>
+        <div>
+          <p className="font-semibold text-slate-900">{title}</p>
+          <p className="mt-1 text-sm text-slate-600">{desc}</p>
+        </div>
+      </div>
+    </div>
   );
 }

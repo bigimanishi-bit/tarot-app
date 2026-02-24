@@ -16,113 +16,85 @@ export function OccultShell({
   className?: string;
 }) {
   return (
-    <main className={clsx("min-h-screen text-white", className)}>
+    <main className={clsx("min-h-screen text-[rgba(10,16,28,.92)]", className)}>
       <style>{`
         :root{
-          --gold: 226, 180, 92;
-          --amber: 255, 196, 120;
-          --vio: 160, 110, 255;
-          --cya:  90, 220, 255;
-          --bd: rgba(255,255,255,.12);
-          --glassTop: rgba(255,255,255,.12);
-          --glassBot: rgba(255,255,255,.06);
+          --ink: rgba(10,16,28,.92);
+          --muted: rgba(10,16,28,.62);
+
+          --gold: 208,176,108;
+          --silver: 210,214,224;
+
+          --bd: rgba(10,16,28,.10);
+          --glassTop: rgba(255,255,255,.75);
+          --glassBot: rgba(255,255,255,.48);
         }
 
         .bg{
           position: fixed; inset:0; z-index:0; pointer-events:none;
-          background: url("/assets/occult-bg.jpg");
-          background-size: cover;
-          background-position: center;
-          filter: saturate(1.05) contrast(1.06) brightness(.80);
-          opacity: .95;
-          transform: scale(1.01);
+          background: linear-gradient(180deg,#fbfbfe,#f2f5fb);
         }
+
         .veil{
           position: fixed; inset:0; z-index:0; pointer-events:none;
           background:
-            radial-gradient(1200px 700px at 50% 25%, rgba(255,255,255,.06), transparent 60%),
-            radial-gradient(1000px 650px at 15% 20%, rgba(var(--vio), .10), transparent 62%),
-            radial-gradient(900px 600px at 85% 25%, rgba(var(--amber), .10), transparent 65%),
-            linear-gradient(180deg, rgba(0,0,0,.60), rgba(0,0,0,.72));
-          opacity: .92;
-        }
-        .dust{
-          position: fixed; inset:0; z-index:0; pointer-events:none;
-          opacity:.18;
-          background-image: radial-gradient(rgba(255,255,255,.35) 1px, transparent 1px);
-          background-size: 160px 160px;
-          background-position: 10px 40px;
-          mask-image: radial-gradient(900px 600px at 40% 18%, #000 30%, transparent 75%);
+            radial-gradient(circle at 50% 40%,
+              transparent 0 210px,
+              rgba(var(--gold), .18) 211px 212px,
+              transparent 213px 280px,
+              rgba(var(--silver), .18) 281px 282px,
+              transparent 283px 360px
+            ),
+            radial-gradient(rgba(10,16,28,.08) 1px, transparent 1px);
+          background-size: auto, 160px 160px;
+          background-position: 0 0, 20px 60px;
+          opacity: 1;
         }
 
         .glass{
-          background: linear-gradient(180deg, var(--glassTop), var(--glassBot));
-          border: 1px solid var(--bd);
+          background: linear-gradient(180deg,var(--glassTop),var(--glassBot));
+          border:1px solid var(--bd);
           box-shadow:
-            0 18px 70px rgba(0,0,0,.55),
-            inset 0 1px 0 rgba(255,255,255,.08);
+            0 18px 70px rgba(10,16,28,.14),
+            inset 0 1px 0 rgba(255,255,255,.7);
           backdrop-filter: blur(18px);
-        }
-        .goldEdge{
-          position: relative;
-          border-radius: 28px;
-        }
-        .goldEdge:before{
-          content:"";
-          position:absolute;
-          inset:-1px;
-          border-radius: 30px;
-          background: linear-gradient(135deg,
-            rgba(var(--gold), .35),
-            rgba(var(--vio), .18),
-            rgba(var(--cya), .14),
-            rgba(var(--gold), .22)
-          );
-          z-index:-1;
-          filter: blur(.25px);
-          opacity:.85;
+          color: var(--ink);
         }
 
         .btn{
-          border: 1px solid rgba(255,255,255,.16);
-          background: rgba(255,255,255,.07);
-          box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
-          transition: transform .12s ease, border-color .12s ease, background .12s ease;
+          border:1px solid rgba(10,16,28,.12);
+          background: rgba(255,255,255,.6);
+          color: var(--ink);
+          box-shadow: inset 0 1px 0 rgba(255,255,255,.7);
         }
-        .btn:hover{ transform: translateY(-1px); border-color: rgba(255,255,255,.26); background: rgba(255,255,255,.09); }
-        .btn:active{ transform: translateY(0px) scale(.99); }
 
         .btnGold{
-          border: 1px solid rgba(var(--gold), .55);
+          border:1px solid rgba(var(--gold),.55);
           background:
-            radial-gradient(100% 120% at 20% 10%, rgba(255,255,255,.20), transparent 55%),
-            linear-gradient(180deg, rgba(var(--gold), .28), rgba(var(--gold), .12));
-          color: rgba(255,245,230,.98);
-          box-shadow:
-            0 14px 40px rgba(0,0,0,.45),
-            inset 0 1px 0 rgba(255,255,255,.14);
+            radial-gradient(120% 140% at 20% 10%, rgba(255,255,255,.75), transparent 55%),
+            linear-gradient(180deg, rgba(var(--gold), .30), rgba(var(--gold), .14));
+          color: var(--ink);
         }
 
         .field{
-          border: 1px solid rgba(255,255,255,.16);
-          background: rgba(0,0,0,.28);
-          outline: none;
+          border:1px solid rgba(10,16,28,.14);
+          background: rgba(255,255,255,.7);
+          color: var(--ink);
+        }
+
+        .field::placeholder{
+          color: rgba(10,16,28,.45);
         }
 
         .pill{
-          border: 1px solid rgba(255,255,255,.16);
-          background: rgba(255,255,255,.08);
-        }
-
-        .heroTitle{
-          text-shadow: 0 10px 30px rgba(0,0,0,.55);
-          letter-spacing: .02em;
+          border:1px solid rgba(10,16,28,.12);
+          background: rgba(255,255,255,.55);
+          color: var(--ink);
         }
       `}</style>
 
       <div className="bg" />
       <div className="veil" />
-      <div className="dust" />
 
       <div className={clsx("relative z-10 mx-auto w-full px-4 py-8", maxWidth)}>
         {children}

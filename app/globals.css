@@ -1,11 +1,9 @@
 /* app/globals.css */
-
-/* ✅ Tailwind v4 推奨：これ1行で base/components/utilities をまとめて読む */
 @import "tailwindcss";
 
-/* ---- product base ---- */
+/* --- Base (White) --- */
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 html,
@@ -15,8 +13,8 @@ body {
 
 body {
   margin: 0;
-  background: #000;
-  color: #fff;
+  background: #ffffff;
+  color: #0f172a; /* slate-900 */
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
     "Apple Color Emoji", "Segoe UI Emoji";
 }
@@ -37,7 +35,6 @@ textarea,
 select,
 button {
   font: inherit;
-  color: inherit;
 }
 
 button {

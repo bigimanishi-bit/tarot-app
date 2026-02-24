@@ -113,13 +113,11 @@ export default function ChatPage() {
   }
 
   async function autoSave(finalMsgs: ChatMsg[], aiText: string) {
-    // 送信後の自動保存だけにしたいので、ここでだけ保存する
     setSaveOk(null);
     setAutoSaving(true);
 
     try {
       const token = await getAccessToken();
-
       const title = nowTitle();
       const cards_text = buildCardsText(deckKey, spread, tone, finalMsgs);
       const result_text = aiText;
@@ -146,7 +144,6 @@ export default function ChatPage() {
       setSaveOk("自動保存しました（履歴に反映）");
       window.setTimeout(() => setSaveOk(null), 2200);
     } catch (e: any) {
-      // 自動保存失敗は「送信失敗」と分ける
       setErr(`自動保存エラー: ${e?.message ?? "save error"}`);
     } finally {
       setAutoSaving(false);
@@ -167,7 +164,6 @@ export default function ChatPage() {
       const ageMs = Date.now() - createdAt;
       const MAX_AGE_MS = 10 * 60 * 1000;
 
-      // 古いseedは誤爆防止で捨てる
       if (!createdAt || ageMs < 0 || ageMs > MAX_AGE_MS) {
         localStorage.removeItem("tarot_chat_seed");
         return;
@@ -264,7 +260,6 @@ export default function ChatPage() {
       const list = (deckRows ?? []) as DeckRow[];
       setDecks(list);
 
-      // seedでセットされてるかもしれないので、空の時だけ補完
       if (list.some((d) => d.key === "rws")) setDeckKey((prev) => (prev ? prev : "rws"));
       else if (list[0]?.key) setDeckKey((prev) => (prev ? prev : list[0].key));
     })();
@@ -283,7 +278,6 @@ export default function ChatPage() {
 
     setSending(true);
 
-    // ① 先にユーザー発言を追加
     const userMsgs: ChatMsg[] = [...messages, { role: "user", content: q }];
     setMessages(userMsgs);
     setText("");
@@ -315,11 +309,9 @@ export default function ChatPage() {
       const out = (json?.readingText as string | undefined) ?? (json?.text as string | undefined) ?? "";
       if (!out) throw new Error("No output");
 
-      // ② AI発言を追加（この最終配列で保存）
       const finalMsgs: ChatMsg[] = [...userMsgs, { role: "assistant", content: out }];
       setMessages(finalMsgs);
 
-      // ③ ✅ 送信後に自動保存（ボタンは無し）
       await autoSave(finalMsgs, out);
     } catch (e: any) {
       setErr(e?.message ?? "error");
@@ -342,359 +334,256 @@ export default function ChatPage() {
   }
 
   return (
-    <main className="min-h-screen text-white">
-      <style>{`
-        :root{
-          --gold: 226, 180, 92;
-          --amber: 255, 196, 120;
-          --vio: 160, 110, 255;
-          --cya:  90, 220, 255;
-          --bd: rgba(255,255,255,.12);
-          --glassTop: rgba(255,255,255,.12);
-          --glassBot: rgba(255,255,255,.06);
-        }
-
-        .bg{
-          position: fixed; inset:0; z-index:0; pointer-events:none;
-          background: url("/assets/occult-bg.jpg");
-          background-size: cover;
-          background-position: center;
-          filter: saturate(1.05) contrast(1.06) brightness(.80);
-          opacity: .95;
-          transform: scale(1.01);
-        }
-        .veil{
-          position: fixed; inset:0; z-index:0; pointer-events:none;
-          background:
-            radial-gradient(1200px 700px at 50% 25%, rgba(255,255,255,.06), transparent 60%),
-            radial-gradient(1000px 650px at 15% 20%, rgba(var(--vio), .10), transparent 62%),
-            radial-gradient(900px 600px at 85% 25%, rgba(var(--amber), .10), transparent 65%),
-            linear-gradient(180deg, rgba(0,0,0,.60), rgba(0,0,0,.72));
-          opacity: .92;
-        }
-        .dust{
-          position: fixed; inset:0; z-index:0; pointer-events:none;
-          opacity:.18;
-          background-image: radial-gradient(rgba(255,255,255,.35) 1px, transparent 1px);
-          background-size: 160px 160px;
-          background-position: 10px 40px;
-          mask-image: radial-gradient(900px 600px at 40% 18%, #000 30%, transparent 75%);
-        }
-
-        .glass{
-          background: linear-gradient(180deg, var(--glassTop), var(--glassBot));
-          border: 1px solid var(--bd);
-          box-shadow:
-            0 18px 70px rgba(0,0,0,.55),
-            inset 0 1px 0 rgba(255,255,255,.08);
-          backdrop-filter: blur(18px);
-        }
-        .goldEdge{
-          position: relative;
-          border-radius: 28px;
-        }
-        .goldEdge:before{
-          content:"";
-          position:absolute;
-          inset:-1px;
-          border-radius: 30px;
-          background: linear-gradient(135deg,
-            rgba(var(--gold), .35),
-            rgba(var(--vio), .18),
-            rgba(var(--cya), .14),
-            rgba(var(--gold), .22)
-          );
-          z-index:-1;
-          filter: blur(.25px);
-          opacity:.85;
-        }
-
-        .btn{
-          border: 1px solid rgba(255,255,255,.16);
-          background: rgba(255,255,255,.07);
-          box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
-          transition: transform .12s ease, border-color .12s ease, background .12s ease;
-        }
-        .btn:hover{ transform: translateY(-1px); border-color: rgba(255,255,255,.26); background: rgba(255,255,255,.09); }
-        .btn:active{ transform: translateY(0px) scale(.99); }
-
-        .btnGold{
-          border: 1px solid rgba(var(--gold), .55);
-          background:
-            radial-gradient(100% 120% at 20% 10%, rgba(255,255,255,.20), transparent 55%),
-            linear-gradient(180deg, rgba(var(--gold), .28), rgba(var(--gold), .12));
-          color: rgba(255,245,230,.98);
-          box-shadow:
-            0 14px 40px rgba(0,0,0,.45),
-            inset 0 1px 0 rgba(255,255,255,.14);
-        }
-
-        .field{
-          border: 1px solid rgba(255,255,255,.16);
-          background: rgba(0,0,0,.28);
-          outline: none;
-        }
-
-        .chatPane{
-          background: rgba(0,0,0,.20);
-          border: 1px solid rgba(255,255,255,.12);
-        }
-
-        .bubbleBase{
-          border-radius: 18px;
-          border: 1px solid rgba(255,255,255,.14);
-          box-shadow:
-            0 18px 50px rgba(0,0,0,.45),
-            inset 0 1px 0 rgba(255,255,255,.08);
-          backdrop-filter: blur(10px);
-        }
-        .bubbleAi{
-          background:
-            radial-gradient(120% 160% at 10% 10%, rgba(var(--vio), .10), transparent 55%),
-            linear-gradient(180deg, rgba(0,0,0,.50), rgba(0,0,0,.34));
-          color: rgba(255,255,255,.92);
-        }
-        .bubbleUser{
-          background:
-            radial-gradient(120% 160% at 10% 10%, rgba(var(--gold), .12), transparent 60%),
-            linear-gradient(180deg, rgba(255,255,255,.92), rgba(255,255,255,.86));
-          color: rgba(0,0,0,.92);
-          border-color: rgba(var(--gold), .22);
-        }
-
-        .aiAccent{
-          position: relative;
-          padding-left: 14px;
-        }
-        .aiAccent:before{
-          content:"";
-          position:absolute;
-          left: 0;
-          top: 10px;
-          bottom: 10px;
-          width: 3px;
-          border-radius: 999px;
-          background: linear-gradient(180deg, rgba(var(--gold), .55), rgba(var(--vio), .35));
-          opacity: .85;
-        }
-
-        .pill{
-          border: 1px solid rgba(255,255,255,.16);
-          background: rgba(255,255,255,.08);
-        }
-
-        .heroTitle{
-          text-shadow: 0 10px 30px rgba(0,0,0,.55);
-          letter-spacing: .02em;
-        }
-      `}</style>
-
-      <div className="bg" />
-      <div className="veil" />
-      <div className="dust" />
-
-      <div className="relative z-10 mx-auto w-full max-w-6xl px-4 py-8">
-        {seedToast ? (
-          <div className="mb-4 goldEdge glass rounded-[18px] p-3 text-sm text-amber-50">
-            {seedToast}
-          </div>
-        ) : null}
-
-        <div className="goldEdge glass rounded-[28px] p-5 sm:p-7">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="flex items-center gap-3">
-                <span className="rounded-full border border-white/15 bg-black/25 px-4 py-2 text-[11px] tracking-[.18em] text-white/80">
-                  Tarot Studio
-                </span>
-                <span className="text-[12px] text-white/45">Chat</span>
-              </div>
-
-              <h1 className="heroTitle mt-4 text-2xl sm:text-3xl font-semibold">チャット鑑定</h1>
-              <div className="mt-3 text-sm text-white/70">
+    <main
+      className="min-h-screen"
+      style={{
+        backgroundImage: "url(/assets/bg-okinawa-twilight.png)",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+        backgroundAttachment: "fixed",
+      }}
+    >
+      {/* ✅ login と同じ：薄い“無色ベール”のみ（青いグラデは無し） */}
+      <div className="min-h-screen bg-black/10">
+        <div className="mx-auto w-full max-w-6xl px-6 py-10 md:py-14">
+          {/* ヘッダー */}
+          <header className="mb-8 md:mb-10">
+            <div className="inline-flex flex-col gap-3">
+              <h1
+                className="text-4xl md:text-6xl tracking-tight text-slate-900"
+                style={{
+                  fontFamily: 'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+                }}
+              >
+                Tarot Studio
+              </h1>
+              <p className="text-sm md:text-base text-slate-700">カードの声を、あなたの言葉に。</p>
+              <div className="text-sm text-slate-600">
                 {checkingAuth ? "ログイン確認中…" : userEmail ? `ログイン中：${userEmail}` : ""}
               </div>
             </div>
+          </header>
 
-            <div className="flex flex-wrap items-center gap-2">
-              <Link href="/new" className="btn btnGold rounded-2xl px-5 py-3 text-sm font-semibold">
-                ＋ 新規鑑定
-              </Link>
-              <Link href="/read" className="btn rounded-2xl px-5 py-3 text-sm text-white/90">
-                履歴
-              </Link>
-
-              <button
-                type="button"
-                onClick={() => setMessages([{ role: "assistant", content: "チャット鑑定モード。鑑定だけ返します。" }])}
-                className="btn rounded-2xl px-5 py-3 text-sm text-white/90"
-              >
-                リセット
-              </button>
-
-              <button type="button" onClick={logout} className="btn rounded-2xl px-5 py-3 text-sm text-white/90">
-                ログアウト
-              </button>
+          {seedToast ? (
+            <div className="mb-4 rounded-2xl border border-white/40 bg-white/40 p-3 text-sm text-slate-800 backdrop-blur-xl">
+              {seedToast}
             </div>
-          </div>
-
-          {saveOk ? (
-            <div className="mt-4 goldEdge glass rounded-[18px] p-3 text-sm text-amber-50">{saveOk}</div>
           ) : null}
 
-          {autoSaving ? (
-            <div className="mt-4 goldEdge glass rounded-[18px] p-3 text-sm text-white/80">自動保存中…</div>
-          ) : null}
-
-          <div className="mt-7 grid grid-cols-1 gap-6 lg:grid-cols-4">
-            <aside className="lg:col-span-1 space-y-4">
-              <div className="goldEdge glass rounded-[24px] p-4">
-                <div className="text-sm font-semibold text-white/90">ショートカット</div>
-
-                <div className="mt-3 space-y-2">
-                  <button
-                    type="button"
-                    onClick={() => shortcutInsert("恋愛\nカード\n1)\n2)\n3)\n4)\n5)\n\n追加:")}
-                    className="btn w-full rounded-2xl px-3 py-3 text-left text-xs text-white/85"
-                  >
-                    5枚テンプレ
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => shortcutInsert("仕事\nカード\n1)\n2)\n3)\n\n条件: 断定しない/カード名ゼロ/最後に質問しない")}
-                    className="btn w-full rounded-2xl px-3 py-3 text-left text-xs text-white/85"
-                  >
-                    仕事テンプレ
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => shortcutInsert("数字だけで読む。0/1〜21/22（22は0扱い）。正逆は全部「正」扱いで続行。")}
-                    className="btn w-full rounded-2xl px-3 py-3 text-left text-xs text-white/85"
-                  >
-                    数字だけOK ルール
-                  </button>
-                </div>
+          {/* メイン枠：login/new と同じガラス */}
+          <section className="rounded-[28px] border border-white/40 bg-white/18 p-4 shadow-[0_30px_90px_rgba(15,23,42,0.25)] backdrop-blur-xl md:p-6">
+            {/* 上部操作（枠内） */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+                  Chat
+                </span>
+                <span className="text-sm text-slate-600">チャット鑑定</span>
               </div>
 
-              <div className="goldEdge glass rounded-[24px] p-4">
-                <div className="text-sm font-semibold text-white/90">設定</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  href="/new"
+                  className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-amber-100"
+                >
+                  ＋ 新規鑑定
+                </Link>
+                <Link
+                  href="/read"
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  履歴
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setMessages([{ role: "assistant", content: "チャット鑑定モード。鑑定だけ返します。" }])}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  リセット
+                </button>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  ログアウト
+                </button>
+              </div>
+            </div>
 
-                <div className="mt-3 space-y-3">
-                  <div>
-                    <div className="mb-2 text-xs text-white/60">デッキ</div>
-                    <select
-                      value={deckKey}
-                      onChange={(e) => setDeckKey(e.target.value)}
-                      className="field w-full rounded-2xl px-4 py-3 text-sm text-white"
+            {saveOk ? (
+              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50/70 p-3 text-sm text-slate-800">
+                {saveOk}
+              </div>
+            ) : null}
+
+            {autoSaving ? (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-white/70 p-3 text-sm text-slate-700">
+                自動保存中…
+              </div>
+            ) : null}
+
+            {err ? (
+              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50/70 p-3 text-sm text-red-900">
+                <div className="font-semibold">ERROR</div>
+                <div className="mt-1">{err}</div>
+              </div>
+            ) : null}
+
+            {/* 本体 */}
+            <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-4">
+              {/* 左：ショートカット＋設定（newと同じ白カード） */}
+              <aside className="lg:col-span-1 space-y-4">
+                <div className="rounded-2xl border border-white/50 bg-white/68 p-4 shadow-sm">
+                  <div className="text-sm font-semibold text-slate-900">ショートカット</div>
+                  <div className="mt-3 space-y-2">
+                    <button
+                      type="button"
+                      onClick={() => shortcutInsert("恋愛\nカード\n1)\n2)\n3)\n4)\n5)\n\n追加:")}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-left text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50"
                     >
-                      {decks.length === 0 ? <option value="rws">rws</option> : null}
-                      {decks.map((d) => (
-                        <option key={d.key} value={d.key}>
-                          {d.name ?? d.key}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <div className="mb-2 text-xs text-white/60">スプレッド</div>
-                    <select
-                      value={spread}
-                      onChange={(e) => setSpread(e.target.value as SpreadKey)}
-                      className="field w-full rounded-2xl px-4 py-3 text-sm text-white"
+                      5枚テンプレ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        shortcutInsert("仕事\nカード\n1)\n2)\n3)\n\n条件: 断定しない/カード名ゼロ/最後に質問しない")
+                      }
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-left text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50"
                     >
-                      {SPREADS.map((s) => (
-                        <option key={s.key} value={s.key}>
-                          {s.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <div className="mb-2 text-xs text-white/60">トーン</div>
-                    <select
-                      value={tone}
-                      onChange={(e) => setTone(e.target.value as ToneKey)}
-                      className="field w-full rounded-2xl px-4 py-3 text-sm text-white"
+                      仕事テンプレ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => shortcutInsert("数字だけで読む。0/1〜21/22（22は0扱い）。正逆は全部「正」扱いで続行。")}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3 py-3 text-left text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50"
                     >
-                      <option value="warm">やわらかめ</option>
-                      <option value="neutral">ニュートラル</option>
-                      <option value="direct">はっきりめ</option>
-                    </select>
-                  </div>
-
-                  <div className="text-xs text-white/55">
-                    今：<span className="text-white/85">{deckKey}</span> / <span className="text-white/85">{spreadLabel}</span> /{" "}
-                    <span className="text-white/85">{toneLabel}</span>
+                      数字だけOK ルール
+                    </button>
                   </div>
                 </div>
-              </div>
-            </aside>
 
-            <section className="lg:col-span-3">
-              {checkingAuth ? (
-                <div className="text-sm text-white/70">ログイン確認中…</div>
-              ) : (
-                <>
-                  {err ? (
-                    <div className="mb-4 goldEdge glass rounded-[18px] p-3 text-sm text-red-100">
-                      <div className="text-red-200/90">ERROR</div>
-                      <div className="mt-1 text-red-100/90">{err}</div>
-                    </div>
-                  ) : null}
+                <div className="rounded-2xl border border-white/50 bg-white/68 p-4 shadow-sm">
+                  <div className="text-sm font-semibold text-slate-900">設定</div>
 
-                  <div className="goldEdge glass rounded-[26px] p-4">
-                    <div className="chatPane h-[56vh] overflow-y-auto rounded-2xl p-4">
-                      <div className="space-y-4">
-                        {messages.map((m, i) => (
-                          <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
-                            <div
-                              className={clsx(
-                                "bubbleBase max-w-[85%] px-4 py-3 text-sm",
-                                m.role === "user" ? "bubbleUser" : "bubbleAi aiAccent"
-                              )}
-                            >
-                              <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
-                            </div>
-                          </div>
-                        ))}
-                        <div ref={bottomRef} />
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
-                      <textarea
-                        value={text}
-                        onChange={(e) => setText(e.target.value)}
-                        rows={4}
-                        placeholder="例：恋愛。カードは 1,2,3,4,5。追加は 13。"
-                        className="field w-full resize-none rounded-2xl px-4 py-4 text-sm leading-7 text-white placeholder:text-white/35"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-                            e.preventDefault();
-                            send();
-                          }
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={send}
-                        disabled={sending || !text.trim()}
-                        className={clsx("btn btnGold rounded-2xl px-7 py-4 text-sm font-semibold", "disabled:opacity-50 disabled:cursor-not-allowed")}
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <div className="mb-2 text-xs text-slate-600">デッキ</div>
+                      <select
+                        value={deckKey}
+                        onChange={(e) => setDeckKey(e.target.value)}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none"
                       >
-                        {sending ? "送信中…" : "送信"}
-                      </button>
+                        {decks.length === 0 ? <option value="rws">rws</option> : null}
+                        {decks.map((d) => (
+                          <option key={d.key} value={d.key}>
+                            {d.name ?? d.key}
+                          </option>
+                        ))}
+                      </select>
                     </div>
 
-                    <div className="mt-2 text-xs text-white/50">Ctrl+Enter / Cmd+Enter で送信</div>
+                    <div>
+                      <div className="mb-2 text-xs text-slate-600">スプレッド</div>
+                      <select
+                        value={spread}
+                        onChange={(e) => setSpread(e.target.value as SpreadKey)}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none"
+                      >
+                        {SPREADS.map((s) => (
+                          <option key={s.key} value={s.key}>
+                            {s.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <div className="mb-2 text-xs text-slate-600">トーン</div>
+                      <select
+                        value={tone}
+                        onChange={(e) => setTone(e.target.value as ToneKey)}
+                        className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none"
+                      >
+                        <option value="warm">やわらかめ</option>
+                        <option value="neutral">ニュートラル</option>
+                        <option value="direct">はっきりめ</option>
+                      </select>
+                    </div>
+
+                    <div className="text-xs text-slate-600">
+                      今：<span className="font-semibold text-slate-900">{deckKey}</span> /{" "}
+                      <span className="font-semibold text-slate-900">{spreadLabel}</span> /{" "}
+                      <span className="font-semibold text-slate-900">{toneLabel}</span>
+                    </div>
                   </div>
-                </>
-              )}
-            </section>
-          </div>
+                </div>
+              </aside>
+
+              {/* 右：チャット */}
+              <section className="lg:col-span-3">
+                <div className="rounded-2xl border border-white/50 bg-white/68 p-5 shadow-sm sm:p-6">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div className="text-sm font-semibold text-slate-900">会話</div>
+                    <div className="text-xs text-slate-500">Ctrl+Enter / Cmd+Enter で送信</div>
+                  </div>
+
+                  <div className="h-[56vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white/70 p-4">
+                    <div className="space-y-4">
+                      {messages.map((m, i) => (
+                        <div key={i} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
+                          <div
+                            className={clsx(
+                              "max-w-[85%] rounded-2xl border px-4 py-3 text-sm shadow-sm",
+                              m.role === "user"
+                                ? "border-amber-200 bg-amber-50/70 text-slate-900"
+                                : "border-slate-200 bg-white/90 text-slate-900"
+                            )}
+                          >
+                            <div className="whitespace-pre-wrap leading-relaxed">{m.content}</div>
+                          </div>
+                        </div>
+                      ))}
+                      <div ref={bottomRef} />
+                    </div>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_auto]">
+                    <textarea
+                      value={text}
+                      onChange={(e) => setText(e.target.value)}
+                      rows={4}
+                      placeholder="例：恋愛。カードは 1,2,3,4,5。追加は 13。"
+                      className="w-full resize-none rounded-2xl border border-slate-200 bg-white px-4 py-4 text-sm leading-7 text-slate-900 shadow-sm outline-none placeholder:text-slate-400 focus:border-slate-300"
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                          e.preventDefault();
+                          send();
+                        }
+                      }}
+                    />
+
+                    <button
+                      type="button"
+                      onClick={send}
+                      disabled={sending || !text.trim()}
+                      className={clsx(
+                        "rounded-2xl border px-7 py-4 text-sm font-semibold shadow-sm transition",
+                        sending || !text.trim()
+                          ? "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                          : "border-amber-200 bg-amber-50 text-slate-900 hover:bg-amber-100"
+                      )}
+                    >
+                      {sending ? "送信中…" : "送信"}
+                    </button>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </section>
+
+          <div className="h-10" />
         </div>
       </div>
     </main>
