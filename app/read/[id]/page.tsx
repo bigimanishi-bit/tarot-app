@@ -1,3 +1,4 @@
+// app/read/[id]/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -51,6 +52,8 @@ export default function ReadDetailPage() {
     let cancelled = false;
 
     (async () => {
+      setStatus("loading...");
+
       const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
       if (cancelled) return;
 
@@ -59,8 +62,32 @@ export default function ReadDetailPage() {
         return;
       }
 
-      if (!sessionData.session) {
+      const session = sessionData.session;
+      if (!session) {
         router.push("/login?reason=not_logged_in");
+        return;
+      }
+
+      const email = session.user.email ?? null;
+      if (!email) {
+        await supabase.auth.signOut();
+        router.push("/login?reason=no_email");
+        return;
+      }
+
+      // ✅ 招待制チェック（/read と同じ）
+      const { data: allowedRows, error: allowErr } = await supabase
+        .from("allowlist")
+        .select("email")
+        .eq("email", email)
+        .eq("enabled", true)
+        .limit(1);
+
+      if (cancelled) return;
+
+      if (allowErr || !allowedRows?.[0]) {
+        await supabase.auth.signOut();
+        router.push("/login?reason=invite_only");
         return;
       }
 
@@ -70,11 +97,12 @@ export default function ReadDetailPage() {
         .eq("enabled", true)
         .order("name", { ascending: true });
 
+      if (cancelled) return;
+
       if (deckErr) {
         setStatus("ERROR deck_library: " + deckErr.message);
         return;
       }
-
       setDecks((deckRows ?? []) as DeckRow[]);
 
       if (!id) {
@@ -82,11 +110,15 @@ export default function ReadDetailPage() {
         return;
       }
 
+      // ✅ readings は自分の分だけ（/read と同じ）
       const { data, error } = await supabase
         .from("readings")
         .select("id, theme, title, cards_text, result_text, created_at")
         .eq("id", id)
+        .eq("user_id", session.user.id)
         .single();
+
+      if (cancelled) return;
 
       if (error) {
         setStatus("ERROR: " + error.message);
@@ -114,220 +146,157 @@ export default function ReadDetailPage() {
   const deckName = deckNameMap.get(deckKey) ?? deckKey;
 
   return (
-    <main className="min-h-screen text-white">
-      <style>{`
-        :root{
-          --gold: 226, 180, 92;
-          --amber: 255, 196, 120;
-          --vio: 160, 110, 255;
-          --cya:  90, 220, 255;
-          --bd: rgba(255,255,255,.12);
-          --bd2: rgba(255,255,255,.20);
-          --glassTop: rgba(255,255,255,.12);
-          --glassBot: rgba(255,255,255,.06);
-        }
-
-        .bg{
-          position: fixed; inset:0; z-index:0; pointer-events:none;
-          background: url("/assets/occult-bg.jpg");
-          background-size: cover;
-          background-position: center;
-          filter: saturate(1.05) contrast(1.06) brightness(.80);
-          opacity: .95;
-          transform: scale(1.01);
-        }
-        .veil{
-          position: fixed; inset:0; z-index:0; pointer-events:none;
-          background:
-            radial-gradient(1200px 700px at 50% 25%, rgba(255,255,255,.06), transparent 60%),
-            radial-gradient(1000px 650px at 15% 20%, rgba(var(--vio), .10), transparent 62%),
-            radial-gradient(900px 600px at 85% 25%, rgba(var(--amber), .10), transparent 65%),
-            linear-gradient(180deg, rgba(0,0,0,.60), rgba(0,0,0,.72));
-          opacity: .92;
-        }
-        .dust{
-          position: fixed; inset:0; z-index:0; pointer-events:none;
-          opacity:.18;
-          background-image: radial-gradient(rgba(255,255,255,.35) 1px, transparent 1px);
-          background-size: 160px 160px;
-          background-position: 10px 40px;
-          mask-image: radial-gradient(900px 600px at 40% 18%, #000 30%, transparent 75%);
-        }
-
-        .glass{
-          background: linear-gradient(180deg, var(--glassTop), var(--glassBot));
-          border: 1px solid var(--bd);
-          box-shadow:
-            0 18px 70px rgba(0,0,0,.55),
-            inset 0 1px 0 rgba(255,255,255,.08);
-          backdrop-filter: blur(18px);
-        }
-        .goldEdge{
-          position: relative;
-          border-radius: 28px;
-        }
-        .goldEdge:before{
-          content:"";
-          position:absolute;
-          inset:-1px;
-          border-radius: 30px;
-          background: linear-gradient(135deg,
-            rgba(var(--gold), .35),
-            rgba(var(--vio), .18),
-            rgba(var(--cya), .14),
-            rgba(var(--gold), .22)
-          );
-          z-index:-1;
-          filter: blur(.25px);
-          opacity:.85;
-        }
-
-        .btn{
-          border: 1px solid rgba(255,255,255,.16);
-          background: rgba(255,255,255,.07);
-          box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
-          transition: transform .12s ease, border-color .12s ease, background .12s ease;
-        }
-        .btn:hover{ transform: translateY(-1px); border-color: rgba(255,255,255,.26); background: rgba(255,255,255,.09); }
-        .btn:active{ transform: translateY(0px) scale(.99); }
-
-        .btnGold{
-          border: 1px solid rgba(var(--gold), .38);
-          background: linear-gradient(180deg, rgba(var(--gold), .16), rgba(var(--gold), .08));
-          color: rgba(255,240,220,.95);
-        }
-
-        .reading{
-          background: rgba(0,0,0,.42);
-          border: 1px solid rgba(255,255,255,.12);
-        }
-
-        .heroTitle{
-          text-shadow: 0 10px 30px rgba(0,0,0,.55);
-          letter-spacing: .02em;
-        }
-      `}</style>
-
-      <div className="bg" />
-      <div className="veil" />
-      <div className="dust" />
-
-      <div className="relative z-10 mx-auto w-full max-w-6xl px-4 py-8">
-        <div className="goldEdge glass rounded-[28px] p-5 sm:p-7">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="flex items-center gap-3">
-                <span className="rounded-full border border-white/15 bg-black/25 px-4 py-2 text-[11px] tracking-[.18em] text-white/80">
-                  Tarot Studio
-                </span>
-                <span className="text-[12px] text-white/45">Reading</span>
-              </div>
-
-              <h1 className="heroTitle mt-4 text-2xl sm:text-3xl font-semibold">
-                {row?.title ?? "鑑定詳細"}
+    <main
+      className="min-h-screen"
+      style={{
+        backgroundImage: "url(/assets/bg-okinawa-twilight.png)",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+        backgroundAttachment: "fixed",
+      }}
+    >
+      <div className="min-h-screen bg-black/10">
+        <div className="mx-auto w-full max-w-6xl px-6 py-10 md:py-14">
+          {/* ヘッダー（login/new と同じ） */}
+          <header className="mb-10 md:mb-12">
+            <div className="inline-flex flex-col gap-3">
+              <h1
+                className="text-4xl md:text-6xl tracking-tight text-slate-900"
+                style={{
+                  fontFamily: 'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+                }}
+              >
+                Tarot Studio
               </h1>
-
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                <span className="rounded-full border border-white/15 bg-black/25 px-3 py-1 text-xs text-white/85">
-                  {deckName}
-                </span>
-                <span className="text-xs text-white/55">
-                  {row?.created_at ? formatDate(row.created_at) : status}
-                </span>
-              </div>
+              <p className="text-sm md:text-base text-slate-700">鑑定詳細（Reading）</p>
+              <p className="text-xs md:text-sm text-slate-600">{row?.created_at ? formatDate(row.created_at) : status}</p>
             </div>
+          </header>
 
-            {/* ✅ 枠外ナビの原因だった “pill” 行は完全撤去。枠内だけに統一 */}
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => router.push("/read")}
-                className="btn rounded-2xl px-5 py-3 text-sm text-white/90"
-              >
-                一覧へ
-              </button>
-
-              <Link href="/chat" className="btn rounded-2xl px-5 py-3 text-sm text-white/90">
-                チャットへ
-              </Link>
-
-              <Link href="/new" className="btn btnGold rounded-2xl px-5 py-3 text-sm font-semibold">
-                ＋ 新規鑑定
-              </Link>
-
-              <button type="button" onClick={logout} className="btn rounded-2xl px-5 py-3 text-sm text-white/90">
-                ログアウト
-              </button>
-            </div>
-          </div>
-
-          <div className="mt-7 grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <div className="goldEdge glass rounded-[22px] p-4 lg:col-span-2">
-              <div className="mb-2 text-[11px] font-semibold tracking-widest text-white/60">
-                READING
-              </div>
-              {row?.result_text ? (
-                <div className="reading rounded-2xl p-4">
-                  <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-white/92">
-                    {row.result_text}
-                  </div>
+          <section className="rounded-[28px] border border-white/40 bg-white/18 p-4 shadow-[0_30px_90px_rgba(15,23,42,0.25)] backdrop-blur-xl md:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+                    {deckName}
+                  </span>
+                  <span className="text-xs text-slate-600">{row?.id ? `ID: ${row.id}` : ""}</span>
                 </div>
-              ) : (
-                <div className="text-sm text-white/60">鑑定結果がありません</div>
-              )}
-            </div>
 
-            <div className="goldEdge glass rounded-[22px] p-4">
-              <div className="mb-3 text-sm font-semibold text-white/90">操作</div>
+                <h2
+                  className="mt-3 text-2xl font-semibold tracking-tight text-slate-900 md:text-3xl"
+                  style={{
+                    fontFamily: 'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+                  }}
+                >
+                  {row?.title ?? "鑑定詳細"}
+                </h2>
 
-              <button
-                type="button"
-                onClick={() => setOpenPayload((v) => !v)}
-                className={clsx("btn w-full rounded-2xl px-4 py-3 text-sm", openPayload ? "btnGold" : "text-white/90")}
-              >
-                {openPayload ? "カード情報を隠す" : "カード情報を見る"}
-              </button>
+                {!openPayload && row?.result_text ? (
+                  <div className="mt-2 text-[11px] text-slate-500">
+                    先頭プレビュー：{shortPreview(row.result_text, 180)}
+                  </div>
+                ) : null}
+              </div>
 
-              <button
-                type="button"
-                onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-                className="btn mt-2 w-full rounded-2xl px-4 py-3 text-sm text-white/90"
-              >
-                上へ
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => router.push("/read")}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  一覧へ
+                </button>
 
-              <button
-                type="button"
-                onClick={logout}
-                className="btn mt-2 w-full rounded-2xl px-4 py-3 text-sm text-white/90"
-              >
-                ログアウト
-              </button>
+                <Link
+                  href="/chat"
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  チャットへ
+                </Link>
 
-              <div className="mt-4 text-xs text-white/45">
-                ID: <span className="text-white/70">{row?.id ?? "-"}</span>
+                <Link
+                  href="/new"
+                  className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-amber-100"
+                >
+                  ＋ 新規鑑定
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  ログアウト
+                </button>
               </div>
             </div>
-          </div>
 
-          {openPayload && row?.cards_text ? (
-            <div className="mt-5 goldEdge glass rounded-[22px] p-4">
-              <div className="mb-2 text-[11px] font-semibold tracking-widest text-white/60">
-                PAYLOAD
+            <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-3">
+              {/* READING */}
+              <div className="rounded-2xl border border-white/50 bg-white/68 p-5 shadow-sm lg:col-span-2">
+                <div className="mb-2 text-[11px] font-semibold tracking-widest text-slate-600">READING</div>
+
+                {row?.result_text ? (
+                  <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                    <div className="whitespace-pre-wrap break-words text-sm leading-relaxed text-slate-900">
+                      {row.result_text}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-600">鑑定結果がありません</div>
+                )}
               </div>
-              <div className="reading rounded-2xl p-4">
-                <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-white/78">
-                  {row.cards_text}
-                </pre>
+
+              {/* 操作 */}
+              <div className="rounded-2xl border border-white/50 bg-white/68 p-5 shadow-sm">
+                <div className="mb-3 text-sm font-bold text-slate-900">操作</div>
+
+                <button
+                  type="button"
+                  onClick={() => setOpenPayload((v) => !v)}
+                  className={clsx(
+                    "w-full rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition",
+                    openPayload
+                      ? "border-amber-200 bg-amber-50 text-slate-900 hover:bg-amber-100"
+                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  )}
+                >
+                  {openPayload ? "カード情報を隠す" : "カード情報を見る"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  上へ
+                </button>
+
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  ログアウト
+                </button>
               </div>
             </div>
-          ) : null}
 
-          {!openPayload && row?.result_text ? (
-            <div className="mt-4 text-[11px] text-white/45">
-              先頭プレビュー：{shortPreview(row.result_text, 180)}
-            </div>
-          ) : null}
+            {openPayload && row?.cards_text ? (
+              <div className="mt-5 rounded-2xl border border-white/50 bg-white/68 p-5 shadow-sm">
+                <div className="mb-2 text-[11px] font-semibold tracking-widest text-slate-600">PAYLOAD</div>
+                <div className="rounded-2xl border border-slate-200 bg-white/80 p-4">
+                  <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-slate-900">
+                    {row.cards_text}
+                  </pre>
+                </div>
+              </div>
+            ) : null}
+          </section>
+
+          <div className="h-10" />
         </div>
       </div>
     </main>

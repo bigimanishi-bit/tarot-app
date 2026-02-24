@@ -164,291 +164,215 @@ export default function ReadPage() {
   const deckShortcuts = useMemo(() => ["all", ...decks.map((d) => d.key)], [decks]);
 
   return (
-    <main className="min-h-screen text-white">
-      <style>{`
-        :root{
-          --gold: 226, 180, 92;
-          --amber: 255, 196, 120;
-          --vio: 160, 110, 255;
-          --cya:  90, 220, 255;
-
-          --bd: rgba(255,255,255,.12);
-          --bd2: rgba(255,255,255,.20);
-
-          --glassTop: rgba(255,255,255,.12);
-          --glassBot: rgba(255,255,255,.06);
-        }
-
-        .bg{
-          position: fixed; inset:0; z-index:0; pointer-events:none;
-          background: url("/assets/occult-bg.jpg");
-          background-size: cover;
-          background-position: center;
-          filter: saturate(1.05) contrast(1.06) brightness(.80);
-          opacity: .95;
-          transform: scale(1.01);
-        }
-
-        .veil{
-          position: fixed; inset:0; z-index:0; pointer-events:none;
-          background:
-            radial-gradient(1200px 700px at 50% 25%, rgba(255,255,255,.06), transparent 60%),
-            radial-gradient(1000px 650px at 15% 20%, rgba(var(--vio), .10), transparent 62%),
-            radial-gradient(900px 600px at 85% 25%, rgba(var(--amber), .10), transparent 65%),
-            linear-gradient(180deg, rgba(0,0,0,.60), rgba(0,0,0,.72));
-          opacity: .92;
-        }
-
-        .dust{
-          position: fixed; inset:0; z-index:0; pointer-events:none;
-          opacity:.18;
-          background-image: radial-gradient(rgba(255,255,255,.35) 1px, transparent 1px);
-          background-size: 160px 160px;
-          background-position: 10px 40px;
-          mask-image: radial-gradient(900px 600px at 40% 18%, #000 30%, transparent 75%);
-        }
-
-        .glass{
-          background: linear-gradient(180deg, var(--glassTop), var(--glassBot));
-          border: 1px solid var(--bd);
-          box-shadow:
-            0 18px 70px rgba(0,0,0,.55),
-            inset 0 1px 0 rgba(255,255,255,.08);
-          backdrop-filter: blur(18px);
-        }
-
-        .goldEdge{
-          position: relative;
-          border-radius: 28px;
-        }
-        .goldEdge:before{
-          content:"";
-          position:absolute;
-          inset:-1px;
-          border-radius: 30px;
-          background: linear-gradient(135deg,
-            rgba(var(--gold), .35),
-            rgba(var(--vio), .18),
-            rgba(var(--cya), .14),
-            rgba(var(--gold), .22)
-          );
-          z-index:-1;
-          filter: blur(.25px);
-          opacity:.85;
-        }
-
-        .btn{
-          border: 1px solid rgba(255,255,255,.16);
-          background: rgba(255,255,255,.07);
-          box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
-          transition: transform .12s ease, border-color .12s ease, background .12s ease;
-        }
-        .btn:hover{ transform: translateY(-1px); border-color: rgba(255,255,255,.26); background: rgba(255,255,255,.09); }
-        .btn:active{ transform: translateY(0px) scale(.99); }
-
-        .btnGold{
-          border: 1px solid rgba(var(--gold), .38);
-          background: linear-gradient(180deg, rgba(var(--gold), .16), rgba(var(--gold), .08));
-          color: rgba(255,240,220,.95);
-        }
-
-        .field{
-          border: 1px solid rgba(255,255,255,.16);
-          background: rgba(0,0,0,.28);
-          outline: none;
-        }
-        .field:focus{ border-color: rgba(255,255,255,.28); }
-
-        .reading{
-          background: rgba(0,0,0,.42);
-          border: 1px solid rgba(255,255,255,.12);
-        }
-
-        .lift{ transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease; }
-        .lift:hover{
-          transform: translateY(-2px);
-          border-color: var(--bd2);
-          box-shadow: 0 28px 90px rgba(0,0,0,.68), inset 0 1px 0 rgba(255,255,255,.07);
-        }
-
-        .pill{
-          border: 1px solid rgba(255,255,255,.16);
-          background: rgba(255,255,255,.08);
-        }
-
-        .heroTitle{
-          text-shadow: 0 10px 30px rgba(0,0,0,.55);
-          letter-spacing: .02em;
-        }
-      `}</style>
-
-      <div className="bg" />
-      <div className="veil" />
-      <div className="dust" />
-
-      <div className="relative z-10 mx-auto w-full max-w-6xl px-4 py-8">
-        {/* ✅ 枠外のナビ（pills）は削除。ここには何も置かない */}
-
-        <div className="goldEdge glass rounded-[28px] p-5 sm:p-7">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="flex items-center gap-3">
-                <span className="rounded-full border border-white/15 bg-black/25 px-4 py-2 text-[11px] tracking-[.18em] text-white/80">
-                  Tarot Studio
-                </span>
-                <span className="text-[12px] text-white/45">History</span>
-              </div>
-
-              <h1 className="heroTitle mt-4 text-3xl sm:text-4xl font-semibold">鑑定履歴</h1>
-              <div className="mt-3 text-sm text-white/70">{status}</div>
-            </div>
-
-            {/* ✅ 枠内だけに操作を集約（重複を消す） */}
-            <div className="flex flex-wrap items-center gap-2">
-              <Link href="/new" className="btn btnGold rounded-2xl px-5 py-3 text-sm font-semibold">
-                ＋ 新規鑑定
-              </Link>
-              <Link href="/chat" className="btn rounded-2xl px-5 py-3 text-sm text-white/90">
-                チャットへ
-              </Link>
-              <button
-                type="button"
-                onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-                className="btn rounded-2xl px-5 py-3 text-sm text-white/90"
+    <main
+      className="min-h-screen"
+      style={{
+        backgroundImage: "url(/assets/bg-okinawa-twilight.png)",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+        backgroundAttachment: "fixed",
+      }}
+    >
+      <div className="min-h-screen bg-black/10">
+        <div className="mx-auto w-full max-w-6xl px-6 py-10 md:py-14">
+          {/* ヘッダー（login/new と同じ） */}
+          <header className="mb-10 md:mb-12">
+            <div className="inline-flex flex-col gap-3">
+              <h1
+                className="text-4xl md:text-6xl tracking-tight text-slate-900"
+                style={{
+                  fontFamily:
+                    'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+                }}
               >
-                上へ
-              </button>
-              <button type="button" onClick={logout} className="btn rounded-2xl px-5 py-3 text-sm text-white/90">
-                ログアウト
-              </button>
+                Tarot Studio
+              </h1>
+              <p className="text-sm md:text-base text-slate-700">鑑定履歴（History）</p>
+              <p className="text-xs md:text-sm text-slate-600">{status}</p>
             </div>
-          </div>
+          </header>
 
-          <div className="mt-7 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="goldEdge glass rounded-[22px] p-4">
-              <div className="text-xs text-white/60">総件数</div>
-              <div className="mt-2 text-3xl font-semibold text-white/90">{stats.total}</div>
-            </div>
-            <div className="goldEdge glass rounded-[22px] p-4">
-              <div className="text-xs text-white/60">デッキ数</div>
-              <div className="mt-2 text-3xl font-semibold text-white/90">{stats.uniqDecks}</div>
-            </div>
-            <div className="goldEdge glass rounded-[22px] p-4">
-              <div className="text-xs text-white/60">最新</div>
-              <div className="mt-3 text-sm font-semibold text-white/85">{stats.last}</div>
-            </div>
-          </div>
-        </div>
+          {/* 上のガラス枠 */}
+          <section className="rounded-[28px] border border-white/40 bg-white/18 p-4 shadow-[0_30px_90px_rgba(15,23,42,0.25)] backdrop-blur-xl md:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+                  History
+                </span>
+                <span className="text-sm text-slate-600">保存された鑑定を一覧できます</span>
+              </div>
 
-        <div className="mt-7 grid grid-cols-1 gap-6 lg:grid-cols-4">
-          <aside className="lg:col-span-1 space-y-4">
-            <div className="goldEdge glass rounded-[24px] p-4">
-              <div className="text-sm font-semibold text-white/90">検索</div>
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="タイトル / 結果 / デッキ / payload"
-                className="field mt-3 w-full rounded-2xl px-4 py-3 text-sm text-white placeholder:text-white/35"
-              />
-              <div className="mt-2 text-[11px] text-white/45">例：恋愛 / 仕事 / rws / after …</div>
-            </div>
-
-            <div className="goldEdge glass rounded-[24px] p-4">
-              <div className="text-sm font-semibold text-white/90">ショートカット</div>
-              <div className="mt-3 space-y-2">
-                {deckShortcuts.map((k) => {
-                  const active = deckFilter === k;
-                  const label = k === "all" ? "全デッキ" : deckNameMap.get(k) ?? k;
-                  return (
-                    <button
-                      key={k}
-                      type="button"
-                      onClick={() => setDeckFilter(k)}
-                      className={clsx("btn w-full rounded-2xl px-3 py-3 text-left text-xs", active ? "btnGold" : "text-white/85")}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  href="/new"
+                  className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-amber-100"
+                >
+                  ＋ 新規鑑定
+                </Link>
+                <Link
+                  href="/chat"
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  チャットへ
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  上へ
+                </button>
+                <button
+                  type="button"
+                  onClick={logout}
+                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  ログアウト
+                </button>
               </div>
             </div>
 
-            {/* ✅ 左下「絞り込み（select）」は削除（ショートカットと被る） */}
-          </aside>
+            <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-white/50 bg-white/68 p-4 shadow-sm">
+                <div className="text-xs text-slate-600">総件数</div>
+                <div className="mt-2 text-3xl font-semibold text-slate-900">{stats.total}</div>
+              </div>
+              <div className="rounded-2xl border border-white/50 bg-white/68 p-4 shadow-sm">
+                <div className="text-xs text-slate-600">デッキ数</div>
+                <div className="mt-2 text-3xl font-semibold text-slate-900">{stats.uniqDecks}</div>
+              </div>
+              <div className="rounded-2xl border border-white/50 bg-white/68 p-4 shadow-sm">
+                <div className="text-xs text-slate-600">最新</div>
+                <div className="mt-3 text-sm font-semibold text-slate-900">{stats.last}</div>
+              </div>
+            </div>
+          </section>
 
-          <section className="lg:col-span-3">
-            <div className="goldEdge glass rounded-[28px] p-4 sm:p-5">
-              {filtered.length === 0 ? (
-                <div className="goldEdge glass rounded-[24px] p-6">
-                  <div className="text-sm font-semibold text-white/90">まだ履歴がありません</div>
-                  <div className="mt-2 text-xs text-white/55">「新規鑑定」から作ると、ここに溜まります。</div>
-                  <div className="mt-4">
-                    <Link href="/new" className="btn btnGold inline-flex rounded-2xl px-5 py-3 text-sm font-semibold">
-                      ＋ 新規鑑定
-                    </Link>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {filtered.map((r) => {
-                    const dk = r.theme ?? "rws";
-                    const dn = deckNameMap.get(dk) ?? dk;
-                    const opened = openCardsId === r.id;
-                    const title = r.title || "タイトルなし";
-                    const result = r.result_text ?? "";
+          {/* 下：検索＋一覧 */}
+          <div className="mt-7 grid grid-cols-1 gap-6 lg:grid-cols-4">
+            <aside className="lg:col-span-1 space-y-4">
+              <div className="rounded-2xl border border-white/50 bg-white/68 p-5 shadow-sm">
+                <div className="text-sm font-bold text-slate-900">検索</div>
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="タイトル / 結果 / デッキ / payload"
+                  className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400"
+                />
+                <div className="mt-2 text-[11px] text-slate-500">例：恋愛 / 仕事 / rws / after …</div>
+              </div>
 
+              <div className="rounded-2xl border border-white/50 bg-white/68 p-5 shadow-sm">
+                <div className="text-sm font-bold text-slate-900">デッキ</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {deckShortcuts.map((k) => {
+                    const active = deckFilter === k;
+                    const label = k === "all" ? "全デッキ" : deckNameMap.get(k) ?? k;
                     return (
-                      <article key={r.id} className="goldEdge glass lift rounded-[26px] p-5">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div className="flex items-center gap-2">
-                            <span className="rounded-full border border-white/15 bg-black/25 px-3 py-1 text-xs text-white/85">
-                              {dn}
-                            </span>
-                            <span className="text-xs text-white/55">{formatDate(r.created_at)}</span>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => setOpenCardsId(opened ? null : r.id)}
-                              className="btn rounded-2xl px-4 py-2 text-xs text-white/90"
-                            >
-                              {opened ? "カードを隠す" : "カードを見る"}
-                            </button>
-
-                            <Link href={`/read/${r.id}`} className="btn btnGold rounded-2xl px-4 py-2 text-xs font-semibold">
-                              開く
-                            </Link>
-                          </div>
-                        </div>
-
-                        <h2 className="mt-3 text-lg sm:text-xl font-semibold tracking-tight text-white/95">{title}</h2>
-
-                        {result ? (
-                          <div className="mt-3 text-sm leading-relaxed text-white/85">
-                            {shortPreview(result, 220)}
-                          </div>
-                        ) : (
-                          <div className="mt-3 text-sm text-white/60">鑑定結果がありません</div>
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => setDeckFilter(k)}
+                        className={clsx(
+                          "rounded-xl border px-3 py-2 text-xs font-semibold shadow-sm transition",
+                          active
+                            ? "border-amber-200 bg-amber-50 text-slate-900"
+                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                         )}
-
-                        {opened && r.cards_text ? (
-                          <div className="reading mt-4 rounded-2xl p-4">
-                            <div className="mb-2 text-[11px] font-semibold tracking-widest text-white/60">
-                              PAYLOAD
-                            </div>
-                            <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-white/78">
-                              {r.cards_text}
-                            </pre>
-                          </div>
-                        ) : null}
-                      </article>
+                      >
+                        {label}
+                      </button>
                     );
                   })}
                 </div>
-              )}
-            </div>
-          </section>
+              </div>
+            </aside>
+
+            <section className="lg:col-span-3">
+              <section className="rounded-[28px] border border-white/40 bg-white/18 p-4 shadow-[0_30px_90px_rgba(15,23,42,0.25)] backdrop-blur-xl sm:p-5">
+                {filtered.length === 0 ? (
+                  <div className="rounded-2xl border border-white/50 bg-white/68 p-6 shadow-sm">
+                    <div className="text-sm font-semibold text-slate-900">まだ履歴がありません</div>
+                    <div className="mt-2 text-xs text-slate-600">「新規鑑定」から作ると、ここに溜まります。</div>
+                    <div className="mt-4">
+                      <Link
+                        href="/new"
+                        className="inline-flex rounded-xl border border-amber-200 bg-amber-50 px-5 py-3 text-sm font-semibold text-slate-900 shadow-sm hover:bg-amber-100"
+                      >
+                        ＋ 新規鑑定
+                      </Link>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {filtered.map((r) => {
+                      const dk = r.theme ?? "rws";
+                      const dn = deckNameMap.get(dk) ?? dk;
+                      const opened = openCardsId === r.id;
+                      const title = r.title || "タイトルなし";
+                      const result = r.result_text ?? "";
+
+                      return (
+                        <article key={r.id} className="rounded-2xl border border-white/50 bg-white/68 p-5 shadow-sm">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                              <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
+                                {dn}
+                              </span>
+                              <span className="text-xs text-slate-500">{formatDate(r.created_at)}</span>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setOpenCardsId(opened ? null : r.id)}
+                                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+                              >
+                                {opened ? "カードを隠す" : "カードを見る"}
+                              </button>
+
+                              <Link
+                                href={`/read/${r.id}`}
+                                className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-semibold text-slate-900 shadow-sm hover:bg-amber-100"
+                              >
+                                開く
+                              </Link>
+                            </div>
+                          </div>
+
+                          <h2 className="mt-3 text-lg font-semibold tracking-tight text-slate-900 sm:text-xl">
+                            {title}
+                          </h2>
+
+                          {result ? (
+                            <div className="mt-3 text-sm leading-relaxed text-slate-700">
+                              {shortPreview(result, 220)}
+                            </div>
+                          ) : (
+                            <div className="mt-3 text-sm text-slate-600">鑑定結果がありません</div>
+                          )}
+
+                          {opened && r.cards_text ? (
+                            <div className="mt-4 rounded-2xl border border-slate-200 bg-white/80 p-4">
+                              <div className="mb-2 text-[11px] font-semibold tracking-widest text-slate-600">
+                                PAYLOAD
+                              </div>
+                              <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-slate-800">
+                                {r.cards_text}
+                              </pre>
+                            </div>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+            </section>
+          </div>
+
+          <div className="h-10" />
         </div>
       </div>
     </main>
