@@ -1,5 +1,5 @@
 // middleware.ts
-import { NextResponse, NextRequest } from "next/server";
+import { NextResponse, NextRequest, NextFetchEvent } from "next/server";
 
 function isTargetPath(pathname: string) {
   return pathname === "/login" || pathname === "/welcome";
@@ -13,22 +13,14 @@ function getOrCreateDeviceId(req: NextRequest) {
   return { deviceId, isNew: true };
 }
 
-// ✅ JST 기준 YYYY-MM-DD を作る（EdgeでOK）
-function jstDayString() {
-  const now = new Date();
-  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  return jst.toISOString().slice(0, 10);
-}
-
-export async function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
+export function middleware(req: NextRequest, ev: NextFetchEvent) {
+  const { pathname, origin } = req.nextUrl;
 
   if (!isTargetPath(pathname)) {
     return NextResponse.next();
   }
 
   const { deviceId, isNew } = getOrCreateDeviceId(req);
-
   const res = NextResponse.next();
 
   if (isNew) {
@@ -41,24 +33,30 @@ export async function middleware(req: NextRequest) {
     });
   }
 
-  // ✅ 監査ログAPIへ（created_day を必ず送る）
-  try {
-    const origin = req.nextUrl.origin;
+  // ✅ 監査ログAPIへ（失敗しても絶対に画面を止めない）
+  const url = `${origin}/api/audit/access`;
 
-    await fetch(`${origin}/api/audit/access`, {
+  // IP推定に必要なヘッダだけ渡す（Vercel想定）
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) headers["x-forwarded-for"] = xff;
+  const realIp = req.headers.get("x-real-ip");
+  if (realIp) headers["x-real-ip"] = realIp;
+  const ua = req.headers.get("user-agent");
+  if (ua) headers["user-agent"] = ua;
+  const al = req.headers.get("accept-language");
+  if (al) headers["accept-language"] = al;
+
+  ev.waitUntil(
+    fetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers,
       body: JSON.stringify({
         path: pathname,
-        device_id: deviceId,
-        created_day: jstDayString(),
+        device_id: deviceId, // ← snakeで統一
       }),
-      // @ts-ignore
-      keepalive: true,
-    });
-  } catch {
-    // 失敗しても画面は止めない
-  }
+    }).catch(() => {})
+  );
 
   return res;
 }
