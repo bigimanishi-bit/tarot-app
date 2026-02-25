@@ -13,6 +13,25 @@ function getOrCreateDeviceId(req: NextRequest) {
   return { deviceId, isNew: true };
 }
 
+// ✅ JST 기준 YYYY-MM-DD
+function jstDayString() {
+  const now = new Date();
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  return jst.toISOString().slice(0, 10);
+}
+
+// ✅ ここで “本物のクライアントIP” を確定
+function getClientIp(req: NextRequest) {
+  const xff = req.headers.get("x-forwarded-for") || "";
+  const first = xff.split(",")[0]?.trim();
+  if (first) return first;
+
+  const realIp = req.headers.get("x-real-ip")?.trim();
+  if (realIp) return realIp;
+
+  return "";
+}
+
 export function middleware(req: NextRequest, ev: NextFetchEvent) {
   const { pathname, origin } = req.nextUrl;
 
@@ -36,16 +55,12 @@ export function middleware(req: NextRequest, ev: NextFetchEvent) {
   // ✅ 監査ログAPIへ（失敗しても絶対に画面を止めない）
   const url = `${origin}/api/audit/access`;
 
-  // IP推定に必要なヘッダだけ渡す（Vercel想定）
+  const clientIp = getClientIp(req);
+
+  // 送るのは最小限（body.ip を最優先にさせる）
   const headers: Record<string, string> = { "content-type": "application/json" };
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) headers["x-forwarded-for"] = xff;
-  const realIp = req.headers.get("x-real-ip");
-  if (realIp) headers["x-real-ip"] = realIp;
   const ua = req.headers.get("user-agent");
   if (ua) headers["user-agent"] = ua;
-  const al = req.headers.get("accept-language");
-  if (al) headers["accept-language"] = al;
 
   ev.waitUntil(
     fetch(url, {
@@ -53,7 +68,9 @@ export function middleware(req: NextRequest, ev: NextFetchEvent) {
       headers,
       body: JSON.stringify({
         path: pathname,
-        device_id: deviceId, // ← snakeで統一
+        device_id: deviceId,
+        created_day: jstDayString(),
+        ip: clientIp || null,
       }),
     }).catch(() => {})
   );

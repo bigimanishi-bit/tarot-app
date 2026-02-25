@@ -76,9 +76,9 @@ export async function POST(req: Request) {
     const ua = req.headers.get("user-agent") || null;
 
     const ip =
-      pickIp(req) ||
-      (typeof body?.ip === "string" ? body.ip.trim() : "") ||
-      "unknown";
+  (typeof body?.ip === "string" ? body.ip.trim() : "") ||
+  pickIp(req) ||
+  "unknown";
 
     // device_id が壊れてても止めない（uuid必須のDBなので生成して入れる）
     const safeDeviceId = isUuid(device_id)
