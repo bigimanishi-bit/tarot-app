@@ -1,6 +1,5 @@
-
 // middleware.ts
-import { NextResponse, NextRequest, NextFetchEvent } from "next/server";
+import { NextResponse, NextRequest } from "next/server";
 
 function isTargetPath(pathname: string) {
   return pathname === "/login" || pathname === "/welcome";
@@ -14,19 +13,14 @@ function getOrCreateDeviceId(req: NextRequest) {
   return { deviceId, isNew: true };
 }
 
-function pickClientIp(req: NextRequest) {
-  const xff = req.headers.get("x-forwarded-for") || "";
-  const first = xff.split(",")[0]?.trim();
-  if (first) return first;
-
-  const xri = req.headers.get("x-real-ip")?.trim();
-  if (xri) return xri;
-
-  // 取れない環境もあるので空で返す（API側でunknown化される）
-  return "";
+// ✅ JST 기준 YYYY-MM-DD を作る（EdgeでOK）
+function jstDayString() {
+  const now = new Date();
+  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  return jst.toISOString().slice(0, 10);
 }
 
-export async function middleware(req: NextRequest, event: NextFetchEvent) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (!isTargetPath(pathname)) {
@@ -34,7 +28,6 @@ export async function middleware(req: NextRequest, event: NextFetchEvent) {
   }
 
   const { deviceId, isNew } = getOrCreateDeviceId(req);
-  const clientIp = pickClientIp(req);
 
   const res = NextResponse.next();
 
@@ -48,25 +41,21 @@ export async function middleware(req: NextRequest, event: NextFetchEvent) {
     });
   }
 
-  // 監査ログ送信（画面遷移を待たない）
+  // ✅ 監査ログAPIへ（created_day を必ず送る）
   try {
     const origin = req.nextUrl.origin;
 
-    event.waitUntil(
-      fetch(`${origin}/api/audit/access`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          path: pathname,
-          device_id: deviceId,
-          ip: clientIp, // ← これが重要
-        }),
-        // @ts-ignore
-        keepalive: true,
-      }).catch(() => {
-        // 失敗しても画面は止めない
-      })
-    );
+    await fetch(`${origin}/api/audit/access`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        path: pathname,
+        device_id: deviceId,
+        created_day: jstDayString(),
+      }),
+      // @ts-ignore
+      keepalive: true,
+    });
   } catch {
     // 失敗しても画面は止めない
   }
