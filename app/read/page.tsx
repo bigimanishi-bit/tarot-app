@@ -1,126 +1,94 @@
 // app/read/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabaseClient";
+import { supabase } from "../../src/lib/supabaseClient";
+import {
+  loadScope,
+  isScopeReady,
+  scopeLabel,
+  type TarotScope,
+} from "../../src/lib/scope";
 
 type ReadingRow = {
   id: string;
-  theme: string | null;
   title: string | null;
+  theme: string | null;
   cards_text: string | null;
   result_text: string | null;
-  created_at: string;
+  created_at: string | null;
+  mode: string | null;
+  target_type: string | null;
+  client_profile_id: string | null;
 };
 
-type DeckRow = { key: string; name: string };
+type DeckRow = { key: string; name: string | null };
 
 function clsx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
 }
-function formatDate(iso: string) {
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
-  }
-}
-function shortPreview(s: string, n: number) {
-  const t = (s ?? "").replace(/\s+/g, " ").trim();
-  return t.length > n ? t.slice(0, n) + "…" : t;
+
+function formatDt(v: string | null) {
+  if (!v) return "";
+  const d = new Date(v);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(
+    d.getHours()
+  )}:${pad(d.getMinutes())}`;
 }
 
 export default function ReadPage() {
   const router = useRouter();
 
+  // ✅ Hooksは必ず最上段で全部呼ぶ（条件で増減させない）
+  const [booting, setBooting] = useState(true);
   const [status, setStatus] = useState("loading...");
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  const [scope, setScope] = useState<TarotScope | null>(null);
+
   const [rows, setRows] = useState<ReadingRow[]>([]);
   const [decks, setDecks] = useState<DeckRow[]>([]);
   const [deckFilter, setDeckFilter] = useState<string>("all");
   const [q, setQ] = useState("");
-  const [openCardsId, setOpenCardsId] = useState<string | null>(null);
 
-  const deckNameMap = useMemo(() => {
-    const m = new Map<string, string>();
-    decks.forEach((d) => m.set(d.key, d.name));
-    return m;
-  }, [decks]);
-
+  // ---- auth + scope ----
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
+      setBooting(true);
       setStatus("loading...");
 
-      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      const { data: sessionData, error: sessionErr } =
+        await supabase.auth.getSession();
       if (cancelled) return;
 
       if (sessionErr) {
-        setStatus("ERROR session: " + sessionErr.message);
+        setStatus(sessionErr.message);
+        setBooting(false);
         return;
       }
+
       const session = sessionData.session;
       if (!session) {
-        router.push("/login?reason=not_logged_in");
+        router.replace("/login?reason=not_logged_in");
         return;
       }
 
-      const email = session.user.email ?? null;
-      if (!email) {
-        await supabase.auth.signOut();
-        router.push("/login?reason=no_email");
+      setUserEmail(session.user.email ?? null);
+
+      // scope 必須：なければ welcome に戻す（プライバシー）
+      const sc = loadScope();
+      if (!isScopeReady(sc)) {
+        router.replace("/welcome?reason=select_scope");
         return;
       }
 
-      // ✅ 招待制チェック
-      const { data: allowedRows, error: allowErr } = await supabase
-        .from("allowlist")
-        .select("email")
-        .eq("email", email)
-        .eq("enabled", true)
-        .limit(1);
-
-      if (cancelled) return;
-
-      if (allowErr || !allowedRows?.[0]) {
-        await supabase.auth.signOut();
-        router.push("/login?reason=invite_only");
-        return;
-      }
-
-      const { data: deckRows, error: deckErr } = await supabase
-        .from("deck_library")
-        .select("key, name")
-        .eq("enabled", true)
-        .order("name", { ascending: true });
-
-      if (cancelled) return;
-
-      if (deckErr) {
-        setStatus("ERROR deck_library: " + deckErr.message);
-        return;
-      }
-      setDecks((deckRows ?? []) as DeckRow[]);
-
-      // ✅ readings は自分の分だけ
-      const { data, error } = await supabase
-        .from("readings")
-        .select("id, theme, title, cards_text, result_text, created_at")
-        .eq("user_id", session.user.id)
-        .order("created_at", { ascending: false })
-        .limit(200);
-
-      if (cancelled) return;
-
-      if (error) {
-        setStatus("ERROR readings: " + error.message);
-        return;
-      }
-
-      setRows((data ?? []) as ReadingRow[]);
-      setStatus(`OK. ${data?.length ?? 0} readings`);
+      setScope(sc);
+      setBooting(false);
     })();
 
     return () => {
@@ -128,253 +96,306 @@ export default function ReadPage() {
     };
   }, [router]);
 
+  // ---- decks ----
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const { data: deckRows } = await supabase
+        .from("deck_library")
+        .select("key, name")
+        .order("name", { ascending: true });
+
+      if (cancelled) return;
+      setDecks((deckRows ?? []) as DeckRow[]);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ---- readings (scope + filters) ----
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      if (booting) return;
+      if (!scope) return;
+
+      setStatus("loading...");
+
+      // scopeで完全分離（混ざらない）
+      let query = supabase
+        .from("readings")
+        .select(
+          "id,title,theme,cards_text,result_text,created_at,mode,target_type,client_profile_id"
+        )
+        .order("created_at", { ascending: false })
+        .limit(200);
+
+      if (scope.kind === "self") {
+        query = query.eq("target_type", "self");
+      } else {
+        query = query.eq("target_type", "client");
+        query = query.eq("client_profile_id", scope.clientProfileId);
+      }
+
+      // deck filter は mode に deckKey を入れてる前提（あなたの実装に合わせて）
+      // ※もし deckKey を別カラムで持ってるなら、ここを差し替えてOK
+      if (deckFilter !== "all") {
+        query = query.ilike("mode", `%${deckFilter}%`);
+      }
+
+      const { data, error } = await query;
+
+      if (cancelled) return;
+
+      if (error) {
+        setStatus(error.message);
+        setRows([]);
+        return;
+      }
+
+      setRows((data ?? []) as ReadingRow[]);
+      setStatus("ok");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [booting, scope, deckFilter]);
+
+  const filtered = useMemo(() => {
+    const keyword = q.trim().toLowerCase();
+    if (!keyword) return rows;
+
+    return rows.filter((r) => {
+      const hay =
+        `${r.title ?? ""}\n${r.theme ?? ""}\n${r.cards_text ?? ""}\n${
+          r.result_text ?? ""
+        }\n${r.mode ?? ""}`.toLowerCase();
+      return hay.includes(keyword);
+    });
+  }, [rows, q]);
+
   async function logout() {
     try {
       await supabase.auth.signOut();
     } finally {
-      router.push("/login?reason=signed_out");
+      router.replace("/login?reason=signed_out");
     }
   }
 
-  const stats = useMemo(() => {
-    const total = rows.length;
-    const byDeck = new Map<string, number>();
-    rows.forEach((r) => {
-      const k = r.theme ?? "rws";
-      byDeck.set(k, (byDeck.get(k) ?? 0) + 1);
-    });
-    const uniqDecks = byDeck.size;
-    const last = rows[0]?.created_at ? formatDate(rows[0].created_at) : "-";
-    return { total, uniqDecks, last };
-  }, [rows]);
-
-  const filtered = useMemo(() => {
-    const kw = q.trim().toLowerCase();
-    return rows.filter((r) => {
-      const dk = (r.theme ?? "rws").toLowerCase();
-      const title = (r.title ?? "").toLowerCase();
-      const result = (r.result_text ?? "").toLowerCase();
-      const cards = (r.cards_text ?? "").toLowerCase();
-      if (deckFilter !== "all" && (r.theme ?? "rws") !== deckFilter) return false;
-      if (!kw) return true;
-      return dk.includes(kw) || title.includes(kw) || result.includes(kw) || cards.includes(kw);
-    });
-  }, [rows, deckFilter, q]);
-
-  const deckShortcuts = useMemo(() => ["all", ...decks.map((d) => d.key)], [decks]);
-
+  // ✅ 早期 return は Hooks の後ならOK（booting中は表示だけ変える）
   return (
-    <main
-      className="min-h-screen"
-      style={{
-        backgroundImage: "url(/assets/bg-okinawa-twilight.png)",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-        backgroundRepeat: "no-repeat",
-        backgroundAttachment: "fixed",
-      }}
-    >
-      <div className="min-h-screen bg-black/10">
-        <div className="mx-auto w-full max-w-6xl px-6 py-10 md:py-14">
-          {/* ヘッダー（login/new と同じ） */}
-          <header className="mb-10 md:mb-12">
-            <div className="inline-flex flex-col gap-3">
-              <h1
-                className="text-4xl md:text-6xl tracking-tight text-slate-900"
-                style={{
-                  fontFamily:
-                    'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
-                }}
-              >
-                Tarot Studio
-              </h1>
-              <p className="text-sm md:text-base text-slate-700">鑑定履歴（History）</p>
-              <p className="text-xs md:text-sm text-slate-600">{status}</p>
-            </div>
-          </header>
+    <main className="min-h-screen bg-[#0B1020] text-white">
+      {/* 背景：loginに寄せた夜空 */}
+      <div className="pointer-events-none fixed inset-0">
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(1200px 700px at 18% 22%, rgba(120,140,255,0.18), transparent 60%)," +
+              "radial-gradient(900px 520px at 82% 30%, rgba(255,255,255,0.06), transparent 62%)," +
+              "linear-gradient(180deg, rgba(5,8,18,0.86) 0%, rgba(10,15,30,0.92) 35%, rgba(3,5,12,0.96) 100%)",
+          }}
+        />
+        <Stars />
+      </div>
 
-          {/* 上のガラス枠 */}
-          <section className="rounded-[28px] border border-white/40 bg-white/18 p-4 shadow-[0_30px_90px_rgba(15,23,42,0.25)] backdrop-blur-xl md:p-6">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-3">
-                <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-                  History
-                </span>
-                <span className="text-sm text-slate-600">保存された鑑定を一覧できます</span>
-              </div>
+      {/* sticky header */}
+      <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/60 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 md:px-6">
+          <Link
+            href="/welcome"
+            className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 transition hover:bg-white/5"
+            aria-label="Tarot Studio（Welcomeへ）"
+          >
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/10 text-xs font-semibold text-white/80">
+              TS
+            </span>
+            <span
+              className="text-base font-semibold tracking-tight text-white md:text-lg"
+              style={{
+                fontFamily:
+                  'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+              }}
+            >
+              Tarot Studio
+            </span>
+          </Link>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <Link
-                  href="/new"
-                  className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-semibold text-slate-900 shadow-sm transition hover:bg-amber-100"
-                >
-                  ＋ 新規鑑定
-                </Link>
-                <Link
-                  href="/chat"
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
-                >
-                  チャットへ
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
-                >
-                  上へ
-                </button>
-                <button
-                  type="button"
-                  onClick={logout}
-                  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
-                >
-                  ログアウト
-                </button>
-              </div>
-            </div>
-
-            <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="rounded-2xl border border-white/50 bg-white/68 p-4 shadow-sm">
-                <div className="text-xs text-slate-600">総件数</div>
-                <div className="mt-2 text-3xl font-semibold text-slate-900">{stats.total}</div>
-              </div>
-              <div className="rounded-2xl border border-white/50 bg-white/68 p-4 shadow-sm">
-                <div className="text-xs text-slate-600">デッキ数</div>
-                <div className="mt-2 text-3xl font-semibold text-slate-900">{stats.uniqDecks}</div>
-              </div>
-              <div className="rounded-2xl border border-white/50 bg-white/68 p-4 shadow-sm">
-                <div className="text-xs text-slate-600">最新</div>
-                <div className="mt-3 text-sm font-semibold text-slate-900">{stats.last}</div>
-              </div>
-            </div>
-          </section>
-
-          {/* 下：検索＋一覧 */}
-          <div className="mt-7 grid grid-cols-1 gap-6 lg:grid-cols-4">
-            <aside className="lg:col-span-1 space-y-4">
-              <div className="rounded-2xl border border-white/50 bg-white/68 p-5 shadow-sm">
-                <div className="text-sm font-bold text-slate-900">検索</div>
-                <input
-                  value={q}
-                  onChange={(e) => setQ(e.target.value)}
-                  placeholder="タイトル / 結果 / デッキ / payload"
-                  className="mt-3 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 shadow-sm outline-none placeholder:text-slate-400"
-                />
-                <div className="mt-2 text-[11px] text-slate-500">例：恋愛 / 仕事 / rws / after …</div>
-              </div>
-
-              <div className="rounded-2xl border border-white/50 bg-white/68 p-5 shadow-sm">
-                <div className="text-sm font-bold text-slate-900">デッキ</div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {deckShortcuts.map((k) => {
-                    const active = deckFilter === k;
-                    const label = k === "all" ? "全デッキ" : deckNameMap.get(k) ?? k;
-                    return (
-                      <button
-                        key={k}
-                        type="button"
-                        onClick={() => setDeckFilter(k)}
-                        className={clsx(
-                          "rounded-xl border px-3 py-2 text-xs font-semibold shadow-sm transition",
-                          active
-                            ? "border-amber-200 bg-amber-50 text-slate-900"
-                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                        )}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </aside>
-
-            <section className="lg:col-span-3">
-              <section className="rounded-[28px] border border-white/40 bg-white/18 p-4 shadow-[0_30px_90px_rgba(15,23,42,0.25)] backdrop-blur-xl sm:p-5">
-                {filtered.length === 0 ? (
-                  <div className="rounded-2xl border border-white/50 bg-white/68 p-6 shadow-sm">
-                    <div className="text-sm font-semibold text-slate-900">まだ履歴がありません</div>
-                    <div className="mt-2 text-xs text-slate-600">「新規鑑定」から作ると、ここに溜まります。</div>
-                    <div className="mt-4">
-                      <Link
-                        href="/new"
-                        className="inline-flex rounded-xl border border-amber-200 bg-amber-50 px-5 py-3 text-sm font-semibold text-slate-900 shadow-sm hover:bg-amber-100"
-                      >
-                        ＋ 新規鑑定
-                      </Link>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {filtered.map((r) => {
-                      const dk = r.theme ?? "rws";
-                      const dn = deckNameMap.get(dk) ?? dk;
-                      const opened = openCardsId === r.id;
-                      const title = r.title || "タイトルなし";
-                      const result = r.result_text ?? "";
-
-                      return (
-                        <article key={r.id} className="rounded-2xl border border-white/50 bg-white/68 p-5 shadow-sm">
-                          <div className="flex flex-wrap items-center justify-between gap-3">
-                            <div className="flex items-center gap-2">
-                              <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700">
-                                {dn}
-                              </span>
-                              <span className="text-xs text-slate-500">{formatDate(r.created_at)}</span>
-                            </div>
-
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setOpenCardsId(opened ? null : r.id)}
-                                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-                              >
-                                {opened ? "カードを隠す" : "カードを見る"}
-                              </button>
-
-                              <Link
-                                href={`/read/${r.id}`}
-                                className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-semibold text-slate-900 shadow-sm hover:bg-amber-100"
-                              >
-                                開く
-                              </Link>
-                            </div>
-                          </div>
-
-                          <h2 className="mt-3 text-lg font-semibold tracking-tight text-slate-900 sm:text-xl">
-                            {title}
-                          </h2>
-
-                          {result ? (
-                            <div className="mt-3 text-sm leading-relaxed text-slate-700">
-                              {shortPreview(result, 220)}
-                            </div>
-                          ) : (
-                            <div className="mt-3 text-sm text-slate-600">鑑定結果がありません</div>
-                          )}
-
-                          {opened && r.cards_text ? (
-                            <div className="mt-4 rounded-2xl border border-slate-200 bg-white/80 p-4">
-                              <div className="mb-2 text-[11px] font-semibold tracking-widest text-slate-600">
-                                PAYLOAD
-                              </div>
-                              <pre className="whitespace-pre-wrap break-words font-sans text-xs leading-relaxed text-slate-800">
-                                {r.cards_text}
-                              </pre>
-                            </div>
-                          ) : null}
-                        </article>
-                      );
-                    })}
-                  </div>
-                )}
-              </section>
-            </section>
+          <div className="flex items-center gap-2">
+            <span className="hidden rounded-full border border-white/12 bg-white/8 px-3 py-1 text-xs font-semibold text-white/70 md:inline-flex">
+              {scope ? scopeLabel(scope) : "scope未選択"}
+            </span>
+            <Link
+              href="/new"
+              className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
+            >
+              ＋ 新規鑑定
+            </Link>
+            <button
+              onClick={logout}
+              className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
+            >
+              ログアウト
+            </button>
           </div>
-
-          <div className="h-10" />
         </div>
       </div>
+
+      <div className="relative mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-10">
+        <header className="mb-4">
+          <h1
+            className="text-2xl font-semibold tracking-tight text-white md:text-3xl"
+            style={{
+              fontFamily:
+                'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+            }}
+          >
+            History
+          </h1>
+          <p className="mt-2 text-sm text-white/65">
+            保存された鑑定を一覧できます（scopeで完全分離）
+          </p>
+          <p className="mt-1 text-xs text-white/45">
+            {userEmail ? `ログイン中：${userEmail}` : ""}{" "}
+            {status !== "ok" ? ` / ${status}` : ""}
+          </p>
+        </header>
+
+        {/* controls */}
+        <section className="rounded-[26px] border border-white/12 bg-white/6 p-4 shadow-[0_35px_110px_rgba(0,0,0,0.55)] backdrop-blur-2xl md:p-5">
+          <div className="grid gap-3 md:grid-cols-3 md:items-end">
+            <div>
+              <div className="mb-2 text-xs font-semibold text-white/75">
+                検索
+              </div>
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="タイトル / テーマ / 結果 / デッキ など"
+                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white shadow-sm outline-none placeholder:text-white/35 focus:border-white/20"
+              />
+            </div>
+
+            <div>
+              <div className="mb-2 text-xs font-semibold text-white/75">
+                デッキ
+              </div>
+              <select
+                value={deckFilter}
+                onChange={(e) => setDeckFilter(e.target.value)}
+                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white shadow-sm outline-none focus:border-white/20"
+              >
+                <option value="all">全デッキ</option>
+                {decks.map((d) => (
+                  <option key={d.key} value={d.key}>
+                    {d.name ?? d.key}
+                  </option>
+                ))}
+              </select>
+              <div className="mt-2 text-[11px] text-white/45">
+                ※ deckFilter は mode に deckKey が入ってる想定
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between gap-2">
+              <Link
+                href="/welcome"
+                className="w-full rounded-2xl border border-white/12 bg-white/8 px-4 py-3 text-center text-sm font-semibold text-white/85 hover:bg-white/12"
+              >
+                scopeを切り替える（Welcome）
+              </Link>
+            </div>
+          </div>
+
+          <div className="mt-5 border-t border-white/10 pt-5">
+            {booting ? (
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
+                読み込み中…
+              </div>
+            ) : filtered.length === 0 ? (
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
+                まだ履歴がありません（このscopeでは0件）
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filtered.map((r) => (
+                  <article
+                    key={r.id}
+                    className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="text-xs text-white/55">
+                        {formatDt(r.created_at)}{" "}
+                        {r.mode ? ` / ${r.mode}` : ""}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          href={`/read/${r.id}`}
+                          className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
+                        >
+                          開く
+                        </Link>
+                      </div>
+                    </div>
+
+                    <div
+                      className="mt-2 text-lg font-semibold text-white"
+                      style={{
+                        fontFamily:
+                          'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+                      }}
+                    >
+                      {r.title ?? "（無題）"}
+                    </div>
+
+                    {r.result_text ? (
+                      <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm leading-7 text-white/70">
+                        {r.result_text}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-sm text-white/45">
+                        （結果テキストなし）
+                      </p>
+                    )}
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <div className="h-10" />
+      </div>
     </main>
+  );
+}
+
+function Stars() {
+  return (
+    <div
+      className="absolute inset-0 opacity-70"
+      style={{
+        backgroundImage:
+          "radial-gradient(circle at 12% 18%, rgba(255,255,255,0.22) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 28% 46%, rgba(255,255,255,0.18) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 44% 22%, rgba(255,255,255,0.16) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 62% 18%, rgba(255,255,255,0.20) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 78% 32%, rgba(255,255,255,0.15) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 88% 58%, rgba(255,255,255,0.14) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 24% 78%, rgba(255,255,255,0.14) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 54% 82%, rgba(255,255,255,0.12) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 82% 86%, rgba(255,255,255,0.12) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 18% 32%, rgba(255,255,255,0.22) 0 1.5px, transparent 3px)," +
+          "radial-gradient(circle at 70% 48%, rgba(255,255,255,0.18) 0 1.5px, transparent 3px)," +
+          "radial-gradient(circle at 40% 64%, rgba(255,255,255,0.16) 0 1.5px, transparent 3px)," +
+          "radial-gradient(circle at 64% 28%, rgba(255,255,255,0.18) 0 2px, transparent 4px)",
+        filter: "blur(0.2px)",
+      }}
+    />
   );
 }

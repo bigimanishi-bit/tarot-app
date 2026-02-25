@@ -55,11 +55,15 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json().catch(() => ({} as any));
-    const { theme, title, cards_text, result_text } = body ?? {};
+    const { theme, title, cards_text, result_text, target_type, client_profile_id } = body ?? {};
 
     if (!cards_text || !result_text) {
       return NextResponse.json({ error: "cards_text and result_text are required" }, { status: 400 });
     }
+
+    // ✅ target_type を安全化（self / client のみ）
+    const safeTarget = target_type === "client" ? "client" : "self";
+    const safeClientProfileId = safeTarget === "client" ? (client_profile_id ?? null) : null;
 
     const { error: insErr } = await admin.from("readings").insert({
       user_id: userRes.user.id,
@@ -67,6 +71,8 @@ export async function POST(req: Request) {
       title: title ?? null,
       cards_text,
       result_text,
+      target_type: safeTarget,
+      client_profile_id: safeClientProfileId,
     });
 
     if (insErr) {
