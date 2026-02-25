@@ -1,6 +1,6 @@
 
 // middleware.ts
-import { NextResponse, NextRequest } from "next/server";
+import { NextResponse, NextRequest, NextFetchEvent } from "next/server";
 
 function isTargetPath(pathname: string) {
   return pathname === "/login" || pathname === "/welcome";
@@ -10,28 +10,37 @@ function getOrCreateDeviceId(req: NextRequest) {
   const existing = req.cookies.get("ts_device_id")?.value;
   if (existing) return { deviceId: existing, isNew: false };
 
-  // Edgeでも使えるUUID生成
   const deviceId = crypto.randomUUID();
   return { deviceId, isNew: true };
 }
 
-export async function middleware(req: NextRequest) {
+function pickClientIp(req: NextRequest) {
+  const xff = req.headers.get("x-forwarded-for") || "";
+  const first = xff.split(",")[0]?.trim();
+  if (first) return first;
+
+  const xri = req.headers.get("x-real-ip")?.trim();
+  if (xri) return xri;
+
+  // 取れない環境もあるので空で返す（API側でunknown化される）
+  return "";
+}
+
+export async function middleware(req: NextRequest, event: NextFetchEvent) {
   const { pathname } = req.nextUrl;
 
-  // 対象外は何もしない
   if (!isTargetPath(pathname)) {
     return NextResponse.next();
   }
 
   const { deviceId, isNew } = getOrCreateDeviceId(req);
+  const clientIp = pickClientIp(req);
 
-  // レスポンス準備
   const res = NextResponse.next();
 
-  // cookie無ければ付与（1年）
   if (isNew) {
     res.cookies.set("ts_device_id", deviceId, {
-      httpOnly: false, // クライアントからも読める（必要なら）
+      httpOnly: false,
       secure: true,
       sameSite: "lax",
       path: "/",
@@ -39,21 +48,27 @@ export async function middleware(req: NextRequest) {
     });
   }
 
-  // 監査ログAPIへ（1日1回はDB側で制御）
-  // ※middlewareはEdge → APIはnodejs。ここは fetch でOK。
+  // 監査ログ送信（画面遷移を待たない）
   try {
     const origin = req.nextUrl.origin;
 
-    // keepalive で遷移を邪魔しない（対応環境のみ）
-    await fetch(`${origin}/api/audit/access`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: pathname, device_id: deviceId }),
-      // @ts-ignore
-      keepalive: true,
-    });
+    event.waitUntil(
+      fetch(`${origin}/api/audit/access`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          path: pathname,
+          device_id: deviceId,
+          ip: clientIp, // ← これが重要
+        }),
+        // @ts-ignore
+        keepalive: true,
+      }).catch(() => {
+        // 失敗しても画面は止めない
+      })
+    );
   } catch {
-    // ログ失敗しても画面を止めない
+    // 失敗しても画面は止めない
   }
 
   return res;
