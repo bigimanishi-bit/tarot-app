@@ -134,7 +134,7 @@ export default function ReadPage() {
         .order("created_at", { ascending: false })
         .limit(200);
 
-      if (scope.kind === "self") {
+      if (scope.targetType === "self") {
         query = query.eq("target_type", "self");
       } else {
         query = query.eq("target_type", "client");

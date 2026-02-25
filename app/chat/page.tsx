@@ -38,7 +38,7 @@ function makeId() {
 
 function storageKey(scope: TarotScope) {
   // scopeで完全分離（混ざらない）
-  if (scope.kind === "self") return "ts_chat_self";
+  if (scope.targetType === "self") return "ts_chat_self";
   return `ts_chat_client_${scope.clientProfileId}`;
 }
 

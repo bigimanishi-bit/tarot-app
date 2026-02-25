@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import {
   loadScope,
@@ -31,7 +31,6 @@ function clsx(...xs: Array<string | false | null | undefined>) {
 
 export default function WelcomePage() {
   const router = useRouter();
-  const sp = useSearchParams();
 
   const [checking, setChecking] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -42,19 +41,29 @@ export default function WelcomePage() {
   const [profiles, setProfiles] = useState<ClientProfileRow[]>([]);
   const [q, setQ] = useState("");
 
+  // ✅ useSearchParams をやめて window.location から読む
+  const [nextPath, setNextPath] = useState<string | null>(null);
+
   // 新規登録フォーム
   const [newName, setNewName] = useState("");
   const [newRel, setNewRel] = useState("");
   const [newMemo, setNewMemo] = useState("");
   const [creating, setCreating] = useState(false);
 
-  const nextPath = sp.get("next"); // ガードから飛んできた時用
-
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
       setChecking(true);
       setErr(null);
+
+      // ✅ next をクエリから拾う（CSRでだけ動く）
+      try {
+        const qs = new URLSearchParams(window.location.search);
+        setNextPath(qs.get("next"));
+      } catch {
+        setNextPath(null);
+      }
 
       // 1) ログイン確認
       const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
@@ -98,9 +107,7 @@ export default function WelcomePage() {
       // 4) client_profiles 読み込み（RLSでowner_user_idが効く前提）
       const { data: rows, error: profErr } = await supabase
         .from("client_profiles")
-        .select(
-          "id, display_name, relationship_type, memo, is_active, created_at, updated_at, last_reading_at"
-        )
+        .select("id, display_name, relationship_type, memo, is_active, created_at, updated_at, last_reading_at")
         .order("updated_at", { ascending: false });
 
       if (profErr) {
@@ -196,9 +203,7 @@ export default function WelcomePage() {
           memo: newMemo.trim() || null,
           is_active: true,
         })
-        .select(
-          "id, display_name, relationship_type, memo, is_active, created_at, updated_at, last_reading_at"
-        )
+        .select("id, display_name, relationship_type, memo, is_active, created_at, updated_at, last_reading_at")
         .limit(1)
         .single();
 

@@ -120,7 +120,7 @@ export default function ReadDetailPage() {
         .eq("user_id", session.user.id)
         .limit(1);
 
-      if (sc.kind === "self") {
+      if (sc.targetType === "self") {
         q = q.is("client_profile_id", null);
       } else {
         q = q.eq("client_profile_id", sc.clientProfileId);

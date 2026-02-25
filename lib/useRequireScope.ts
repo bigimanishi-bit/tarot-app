@@ -3,7 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { isScopeReady, loadScope, type TarotScope } from "./scope";
+import { isScopeReady, loadScope, type TarotScope } from "../src/lib/scope";
 
 type Options = {
   requireClient?: boolean; // clientProfileId 必須にする
