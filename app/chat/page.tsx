@@ -57,7 +57,7 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
 
-  // newから渡す seed（あれば最初に流す）
+    // newから渡す seed（あれば最初に流す）
   const seed = useMemo(() => {
     return safeJsonParse<{
       deckKey?: string;
@@ -65,6 +65,12 @@ export default function ChatPage() {
       tone?: string;
       draft?: string;
       createdAt?: number;
+
+      // ✅ Newの一時鑑定結果（Chat先頭に差し込む）
+      initialReadingText?: string | null;
+
+      // 将来増えても落ちないように（必要なら使う）
+      scope?: any;
     }>(typeof window !== "undefined" ? localStorage.getItem("tarot_chat_seed") : null);
   }, []);
 
