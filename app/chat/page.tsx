@@ -124,23 +124,49 @@ export default function ChatPage() {
     }
 
     // 初回だけ seed があれば差し込む（new→chatの相談用）
-    if (seed?.draft?.trim()) {
-      const initial: ChatMsg[] = [
-        {
-          id: makeId(),
-          role: "system",
-          text:
-            "Welcomeで選んだscopeの相談ルームです（混ざりません）。\n必要なら下の内容から相談を続けてください。",
-          createdAt: Date.now(),
-        },
-        {
-          id: makeId(),
-          role: "user",
-          text: seed.draft.trim(),
-          createdAt: Date.now(),
-        },
-      ];
-      setMessages(initial);
+    // 初回だけ seed があれば差し込む（new→chatの相談用）
+if (seed?.draft?.trim()) {
+  const initial: ChatMsg[] = [
+    {
+      id: makeId(),
+      role: "system",
+      text:
+        "Welcomeで選んだscopeの相談ルームです（混ざりません）。\n必要なら下の内容から相談を続けてください。",
+      createdAt: Date.now(),
+    },
+
+    // ✅ Newの「一時鑑定」があれば、先頭に固定で入れる
+    ...(seed?.initialReadingText?.trim()
+      ? ([
+          {
+            id: makeId(),
+            role: "assistant",
+            text:
+              "【一時鑑定（Newの結果）】\n" +
+              seed.initialReadingText.trim() +
+              "\n\n（この内容を前提に、ここから質問してOK）",
+            createdAt: Date.now(),
+          },
+        ] as ChatMsg[])
+      : []),
+
+    {
+      id: makeId(),
+      role: "user",
+      text: seed.draft.trim(),
+      createdAt: Date.now(),
+    },
+  ];
+
+  setMessages(initial);
+
+  // seed は一度使ったら消す（混線防止）
+  try {
+    localStorage.removeItem("tarot_chat_seed");
+  } catch {}
+
+  return;
+}
 
       // seed は一度使ったら消す（混線防止）
       try {
