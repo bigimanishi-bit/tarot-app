@@ -111,82 +111,74 @@ export default function ChatPage() {
     };
   }, [router]);
 
-  // scope が決まったら、そのscope専用のチャットログを読み込む
-  useEffect(() => {
-    if (booting) return;
-    if (!scope) return;
+ // scope が決まったら、そのscope専用のチャットログを読み込む
+useEffect(() => {
+  if (booting) return;
+  if (!scope) return;
 
-    const key = storageKey(scope);
-    const saved = safeJsonParse<ChatMsg[]>(localStorage.getItem(key));
-    if (saved?.length) {
-      setMessages(saved);
-      return;
-    }
+  const key = storageKey(scope);
+  const saved = safeJsonParse<ChatMsg[]>(localStorage.getItem(key));
+  if (saved?.length) {
+    setMessages(saved);
+    return;
+  }
 
-    // 初回だけ seed があれば差し込む（new→chatの相談用）
-    // 初回だけ seed があれば差し込む（new→chatの相談用）
-if (seed?.draft?.trim()) {
-  const initial: ChatMsg[] = [
-    {
-      id: makeId(),
-      role: "system",
-      text:
-        "Welcomeで選んだscopeの相談ルームです（混ざりません）。\n必要なら下の内容から相談を続けてください。",
-      createdAt: Date.now(),
-    },
-
-    // ✅ Newの「一時鑑定」があれば、先頭に固定で入れる
-    ...(seed?.initialReadingText?.trim()
-      ? ([
-          {
-            id: makeId(),
-            role: "assistant",
-            text:
-              "【一時鑑定（Newの結果）】\n" +
-              seed.initialReadingText.trim() +
-              "\n\n（この内容を前提に、ここから質問してOK）",
-            createdAt: Date.now(),
-          },
-        ] as ChatMsg[])
-      : []),
-
-    {
-      id: makeId(),
-      role: "user",
-      text: seed.draft.trim(),
-      createdAt: Date.now(),
-    },
-  ];
-
-  setMessages(initial);
-
-  // seed は一度使ったら消す（混線防止）
-  try {
-    localStorage.removeItem("tarot_chat_seed");
-  } catch {}
-
-  return;
-}
-
-      // seed は一度使ったら消す（混線防止）
-      try {
-        localStorage.removeItem("tarot_chat_seed");
-      } catch {}
-
-      return;
-    }
-
-    // 何もない場合は軽い案内だけ
-    setMessages([
+  // 初回だけ seed があれば差し込む（new→chatの相談用）
+  if (seed?.draft?.trim()) {
+    const initial: ChatMsg[] = [
       {
         id: makeId(),
         role: "system",
         text:
-          "ここは相談用Chatです。\nNewで鑑定 → 追加の疑問が出たらここで相談、の流れでOK。",
+          "Welcomeで選んだscopeの相談ルームです（混ざりません）。\n必要なら下の内容から相談を続けてください。",
         createdAt: Date.now(),
       },
-    ]);
-  }, [booting, scope]); // eslint-disable-line react-hooks/exhaustive-deps
+
+      // ✅ Newの一時鑑定があるなら、先頭に入れる（以後これを前提に質問できる）
+      ...(seed?.initialReadingText?.trim()
+        ? [
+            {
+              id: makeId(),
+              role: "assistant",
+              text:
+                "【一時鑑定（Newの結果）】\n" +
+                seed.initialReadingText.trim() +
+                "\n\n（この内容を前提に、ここから質問してOK）",
+              createdAt: Date.now(),
+            } as ChatMsg,
+          ]
+        : []),
+
+      {
+        id: makeId(),
+        role: "user",
+        text: seed.draft.trim(),
+        createdAt: Date.now(),
+      },
+    ];
+
+    setMessages(initial);
+
+    // seed は一度使ったら消す（混線防止）
+    try {
+      localStorage.removeItem("tarot_chat_seed");
+    } catch {}
+
+    return;
+  }
+
+  // 何もない場合は軽い案内だけ
+  setMessages([
+    {
+      id: makeId(),
+      role: "system",
+      text:
+        "ここは相談用Chatです。\nNewで鑑定 → 追加の疑問が出たらここで相談、の流れでOK。",
+      createdAt: Date.now(),
+    },
+  ]);
+}, [booting, scope, seed]); // eslint-disable-line react-hooks/exhaustive-deps
+// eslint-disable-line react-hooks/exhaustive-deps
 
   // messages 保存（scopeごと）
   useEffect(() => {
