@@ -91,8 +91,8 @@ export default function WelcomePage() {
       // ✅ 今日のおすすめ3枚（ユーザーIDベース）
       try {
         const uid = session.user.id;
-        const cards = getDailyCards(uid);
-        setDailyCards(cards);
+       const daily = getDailyCards(uid);
+setDailyCards(daily.cards);
       } catch {
         setDailyCards(null);
       }
