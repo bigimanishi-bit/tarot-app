@@ -5,6 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
+import { getDailyCards } from "@/lib/dailyCards";
 import {
   loadScope,
   saveScope,
@@ -43,6 +44,9 @@ export default function WelcomePage() {
 
   // ✅ useSearchParams をやめて window.location から読む
   const [nextPath, setNextPath] = useState<string | null>(null);
+
+  // ✅ 今日のおすすめカード（3枚）
+  const [dailyCards, setDailyCards] = useState<string[] | null>(null);
 
   // 新規登録フォーム
   const [newName, setNewName] = useState("");
@@ -84,6 +88,15 @@ export default function WelcomePage() {
       const email = session.user.email ?? null;
       setUserEmail(email);
 
+      // ✅ 今日のおすすめ3枚（ユーザーIDベース）
+      try {
+        const uid = session.user.id;
+        const cards = getDailyCards(uid);
+        setDailyCards(cards);
+      } catch {
+        setDailyCards(null);
+      }
+
       // 2) allowlist（招待制）チェック
       if (email) {
         const { data: allowedRows, error: allowErr } = await supabase
@@ -107,7 +120,9 @@ export default function WelcomePage() {
       // 4) client_profiles 読み込み（RLSでowner_user_idが効く前提）
       const { data: rows, error: profErr } = await supabase
         .from("client_profiles")
-        .select("id, display_name, relationship_type, memo, is_active, created_at, updated_at, last_reading_at")
+        .select(
+          "id, display_name, relationship_type, memo, is_active, created_at, updated_at, last_reading_at"
+        )
         .order("updated_at", { ascending: false });
 
       if (profErr) {
@@ -203,7 +218,9 @@ export default function WelcomePage() {
           memo: newMemo.trim() || null,
           is_active: true,
         })
-        .select("id, display_name, relationship_type, memo, is_active, created_at, updated_at, last_reading_at")
+        .select(
+          "id, display_name, relationship_type, memo, is_active, created_at, updated_at, last_reading_at"
+        )
         .limit(1)
         .single();
 
@@ -337,9 +354,7 @@ export default function WelcomePage() {
                     <div className="mt-2 text-lg font-semibold text-white">
                       今の選択：{scopeLabel(scope)}
                     </div>
-                    <div className="mt-1 text-sm text-white/55">
-                      ※切り替えはWelcomeだけ
-                    </div>
+                    <div className="mt-1 text-sm text-white/55">※切り替えはWelcomeだけ</div>
                   </div>
 
                   <button
@@ -357,9 +372,7 @@ export default function WelcomePage() {
                   </button>
 
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                    <div className="text-sm font-semibold text-white/85">
-                      誰かをみる（カルテ）
-                    </div>
+                    <div className="text-sm font-semibold text-white/85">誰かをみる（カルテ）</div>
                     <div className="mt-1 text-sm leading-6 text-white/60">
                       一人ずつ完全に分けて記録。混ざりません。
                     </div>
@@ -535,6 +548,21 @@ export default function WelcomePage() {
                     このまま鑑定へ進めます。
                   </div>
                 )}
+
+                {/* ✅ 今日のカード（おすすめ） */}
+                <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-sm font-semibold text-white/85">今日のカード（おすすめ）</div>
+
+                  {!dailyCards ? (
+                    <div className="mt-2 text-sm text-white/60">（まだありません）</div>
+                  ) : (
+                    <ul className="mt-2 space-y-1 text-sm text-white/80">
+                      <li>1: {dailyCards[0]}</li>
+                      <li>2: {dailyCards[1]}</li>
+                      <li>3: {dailyCards[2]}</li>
+                    </ul>
+                  )}
+                </div>
 
                 <div className="mt-6 flex items-center justify-between text-xs text-white/45">
                   <span>Tarot Studio / private beta</span>
