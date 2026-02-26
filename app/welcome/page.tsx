@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
-import { getDailyCards } from "@/lib/dailyCards";
+import { getOrCreateDailyCards as getDailyCards } from "@/lib/dailyCards";
 import {
   loadScope,
   saveScope,
