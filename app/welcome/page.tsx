@@ -26,6 +26,81 @@ type ClientProfileRow = {
   last_reading_at: string | null;
 };
 
+type ToneKey = "warm" | "neutral" | "direct";
+type SpreadKey =
+  | "one_card"
+  | "two_choices"
+  | "past_present_future"
+  | "four_situation"
+  | "five_cross"
+  | "five_feelings"
+  | "six_relationship"
+  | "seven_horseshoe"
+  | "eight_workflow"
+  | "nine_box"
+  | "celtic_10"
+  | "twelve_months"
+  | "thirteen_full";
+
+type DeckRow = { key: string; name: string | null };
+type SpreadDef = { key: SpreadKey; label: string };
+
+const SPREADS: SpreadDef[] = [
+  { key: "one_card", label: "1枚（シンプル）" },
+  { key: "two_choices", label: "2枚（A/B）" },
+  { key: "past_present_future", label: "3枚（過去/現在/未来）" },
+  { key: "four_situation", label: "4枚（状況/障害/対策/結果）" },
+  { key: "five_cross", label: "5枚（クロス）" },
+  { key: "five_feelings", label: "5枚（気持ち）" },
+  { key: "six_relationship", label: "6枚（関係）" },
+  { key: "seven_horseshoe", label: "7枚（ホースシュー）" },
+  { key: "eight_workflow", label: "8枚（手順）" },
+  { key: "nine_box", label: "9枚（ボックス）" },
+  { key: "celtic_10", label: "10枚（ケルト十字）" },
+  { key: "twelve_months", label: "12枚（12ヶ月）" },
+  { key: "thirteen_full", label: "13枚（フル）" },
+];
+
+const PRESETS = [
+  {
+    key: "love_5",
+    title: "恋愛：相手の気持ち（5枚）",
+    desc: "現状/本音/ブロック/行動/未来",
+    spread: "five_feelings" as SpreadKey,
+    tone: "direct" as ToneKey,
+    text:
+      "【恋愛】相手の気持ち\n" +
+      "状況を簡潔に：\n\n" +
+      "カード一覧（1〜5）：\n" +
+      "1)\n2)\n3)\n4)\n5)\n\n" +
+      "補足（あれば）：",
+  },
+  {
+    key: "work_3",
+    title: "仕事：現状/課題/アドバイス（3枚）",
+    desc: "短く見たい時",
+    spread: "past_present_future" as SpreadKey,
+    tone: "neutral" as ToneKey,
+    text:
+      "【仕事】現状/課題/アドバイス\n\n" +
+      "カード一覧（1〜3）：\n" +
+      "1)\n2)\n3)\n\n" +
+      "補足：",
+  },
+  {
+    key: "simple_1",
+    title: "1枚：今必要なメッセージ",
+    desc: "サクッと",
+    spread: "one_card" as SpreadKey,
+    tone: "direct" as ToneKey,
+    text:
+      "【1枚】今必要なメッセージ\n\n" +
+      "カード：\n" +
+      "1)\n\n" +
+      "補足：",
+  },
+];
+
 function clsx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
 }
@@ -47,6 +122,24 @@ export default function WelcomePage() {
 
   // ✅ 今日のおすすめカード（3枚）
   const [dailyCards, setDailyCards] = useState<string[] | null>(null);
+
+  // ✅ Welcome内でNew（下書き作成→Chatへ）
+  const [decks, setDecks] = useState<DeckRow[]>([]);
+  const [deckKey, setDeckKey] = useState("rws");
+  const [spread, setSpread] = useState<SpreadKey>("five_feelings");
+  const [tone, setTone] = useState<ToneKey>("direct");
+  const [presetKey, setPresetKey] = useState(PRESETS[0].key);
+  const preset = useMemo(
+    () => PRESETS.find((p) => p.key === presetKey) ?? PRESETS[0],
+    [presetKey]
+  );
+  const [draft, setDraft] = useState(preset.text);
+
+  useEffect(() => {
+    setDraft(preset.text);
+    setSpread(preset.spread);
+    setTone(preset.tone);
+  }, [preset.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 新規登録フォーム
   const [newName, setNewName] = useState("");
@@ -91,8 +184,8 @@ export default function WelcomePage() {
       // ✅ 今日のおすすめ3枚（ユーザーIDベース）
       try {
         const uid = session.user.id;
-       const daily = getDailyCards(uid);
-setDailyCards(daily.cards);
+        const daily = getDailyCards(uid);
+        setDailyCards(daily.cards);
       } catch {
         setDailyCards(null);
       }
@@ -111,6 +204,22 @@ setDailyCards(daily.cards);
           router.replace("/login?reason=invite_only");
           return;
         }
+      }
+
+      // ✅ deck_library 読み込み（Welcome内New用）
+      try {
+        const { data: deckRows } = await supabase
+          .from("deck_library")
+          .select("key, name")
+          .order("name", { ascending: true });
+
+        const list = (deckRows ?? []) as DeckRow[];
+        setDecks(list);
+
+        if (list.some((d) => d.key === "rws")) setDeckKey("rws");
+        else if (list[0]?.key) setDeckKey(list[0].key);
+      } catch {
+        // ignore
       }
 
       // 3) scope 読み込み
@@ -202,7 +311,6 @@ setDailyCards(daily.cards);
         return;
       }
 
-      // client_code は DB側で作ってるなら不要。作ってないならここで適当に生成。
       const clientCode = `C-${new Date()
         .toISOString()
         .replace(/[-:TZ.]/g, "")
@@ -232,13 +340,35 @@ setDailyCards(daily.cards);
       setNewRel("");
       setNewMemo("");
 
-      // 登録したらそのまま“選択状態”に（確定ボタン不要）
       chooseClient(row);
     } catch (e: any) {
       setErr(e?.message ?? "作成に失敗しました");
     } finally {
       setCreating(false);
     }
+  }
+
+  function startChatFromWelcome() {
+    if (!ready) return;
+    try {
+      localStorage.setItem(
+        "tarot_chat_seed",
+        JSON.stringify({
+          deckKey,
+          spread,
+          tone,
+          draft,
+          createdAt: Date.now(),
+        })
+      );
+    } catch {}
+    router.push("/chat");
+  }
+
+  async function copyDraft() {
+    try {
+      await navigator.clipboard.writeText(draft);
+    } catch {}
   }
 
   const primaryBtn = (enabled: boolean) =>
@@ -249,9 +379,15 @@ setDailyCards(daily.cards);
         : "cursor-not-allowed border-white/8 bg-white/5 text-white/35"
     );
 
+  const spreadLabel = useMemo(
+    () => SPREADS.find((s) => s.key === spread)?.label ?? spread,
+    [spread]
+  );
+  const toneLabel =
+    tone === "warm" ? "やわらかめ" : tone === "neutral" ? "ニュートラル" : "はっきり";
+
   return (
     <main className="min-h-screen">
-      {/* 背景：loginと同じ夜空系 */}
       <div className="relative min-h-screen overflow-hidden bg-[#0B1020]">
         <div
           className="pointer-events-none absolute inset-0"
@@ -274,7 +410,6 @@ setDailyCards(daily.cards);
           }}
         />
 
-        {/* sticky header（PCでスクロールしても残る） */}
         <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/55 backdrop-blur-xl">
           <div className="mx-auto max-w-6xl px-4 py-3 md:px-6">
             <div className="flex items-center justify-between gap-3">
@@ -316,7 +451,6 @@ setDailyCards(daily.cards);
         </div>
 
         <div className="relative mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-12">
-          {/* タイトル */}
           <header className="mb-6 md:mb-10">
             <h1
               className="text-4xl tracking-tight text-white md:text-6xl"
@@ -334,14 +468,12 @@ setDailyCards(daily.cards);
             </p>
           </header>
 
-          {/* エラー */}
           {err ? (
             <div className="mb-4 rounded-2xl border border-rose-300/20 bg-rose-500/10 px-5 py-4 text-sm text-rose-100">
               {err}
             </div>
           ) : null}
 
-          {/* メイン（ガラス） */}
           <section className="rounded-[30px] border border-white/12 bg-white/6 p-3 shadow-[0_40px_120px_rgba(0,0,0,0.55)] backdrop-blur-2xl sm:p-4 md:p-6">
             <div className="grid gap-4 md:grid-cols-2 md:gap-6">
               {/* 左：スコープ選択 */}
@@ -474,32 +606,22 @@ setDailyCards(daily.cards);
                 </div>
               </div>
 
-              {/* 右：行き先（スコープが決まるまで押せない） */}
+              {/* 右：Welcome内でNewまで */}
               <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm md:p-6">
                 <div className="mb-4">
                   <div className="text-xs font-semibold tracking-[0.18em] text-white/60">
                     START
                   </div>
-                  <div className="mt-2 text-2xl font-semibold text-white">次にすること</div>
+                  <div className="mt-2 text-2xl font-semibold text-white">
+                    この画面で鑑定を始める
+                  </div>
                   <p className="mt-2 text-sm text-white/65">
-                    どのページでも、鑑定の入れ物はこの選択が自動適用されます。
-                    <br />
-                    変更したい時だけ、Welcomeに戻ってください。
+                    スコープを選んだら、相談文を作ってそのままChatへ進めます。
                   </p>
                 </div>
 
+                {/* 既存リンクも残す */}
                 <div className="grid gap-3">
-                  <Link
-                    href="/new"
-                    className={primaryBtn(ready)}
-                    aria-disabled={!ready}
-                    onClick={(e) => {
-                      if (!ready) e.preventDefault();
-                    }}
-                  >
-                    新規鑑定（New）
-                  </Link>
-
                   <Link
                     href="/read"
                     className={primaryBtn(ready)}
@@ -545,9 +667,131 @@ setDailyCards(daily.cards);
                   <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
                     選択OK：<span className="font-semibold text-white">{scopeLabel(scope)}</span>
                     <br />
-                    このまま鑑定へ進めます。
+                    このまま相談文を作れます。
                   </div>
                 )}
+
+                {/* ✅ Welcome内New（下書き作成） */}
+                <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="text-sm font-semibold text-white/85">新規鑑定（この画面）</div>
+
+                  <div className="mt-3 grid gap-3">
+                    <div>
+                      <div className="mb-2 text-xs font-semibold text-white/70">プリセット</div>
+                      <select
+                        value={presetKey}
+                        onChange={(e) => setPresetKey(e.target.value)}
+                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/90 shadow-sm outline-none focus:border-white/20"
+                      >
+                        {PRESETS.map((p) => (
+                          <option key={p.key} value={p.key}>
+                            {p.title}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="mt-1 text-xs text-white/50">{preset.desc}</div>
+                    </div>
+
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <div>
+                        <div className="mb-2 text-xs font-semibold text-white/70">デッキ</div>
+                        <select
+                          value={deckKey}
+                          onChange={(e) => setDeckKey(e.target.value)}
+                          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/90 shadow-sm outline-none focus:border-white/20"
+                        >
+                          {decks.length === 0 ? <option value="rws">rws</option> : null}
+                          {decks.map((d) => (
+                            <option key={d.key} value={d.key}>
+                              {d.name ?? d.key}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <div className="mb-2 text-xs font-semibold text-white/70">スプレッド</div>
+                        <select
+                          value={spread}
+                          onChange={(e) => setSpread(e.target.value as SpreadKey)}
+                          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/90 shadow-sm outline-none focus:border-white/20"
+                        >
+                          {SPREADS.map((s) => (
+                            <option key={s.key} value={s.key}>
+                              {s.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <div className="mb-2 text-xs font-semibold text-white/70">トーン</div>
+                        <select
+                          value={tone}
+                          onChange={(e) => setTone(e.target.value as ToneKey)}
+                          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/90 shadow-sm outline-none focus:border-white/20"
+                        >
+                          <option value="warm">やわらかめ</option>
+                          <option value="neutral">ニュートラル</option>
+                          <option value="direct">はっきり</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-white/55">
+                      現在：<span className="font-semibold text-white/85">{deckKey}</span> /{" "}
+                      <span className="font-semibold text-white/85">{spreadLabel}</span> /{" "}
+                      <span className="font-semibold text-white/85">{toneLabel}</span>
+                    </div>
+
+                    <div>
+                      <div className="mb-2 text-xs font-semibold text-white/70">相談文（下書き）</div>
+                      <textarea
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        rows={10}
+                        className="w-full resize-none rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm leading-7 text-white/90 shadow-sm outline-none placeholder:text-white/35 focus:border-white/20"
+                        placeholder="ここに相談内容を書いてください"
+                      />
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={startChatFromWelcome}
+                        className={clsx(
+                          "rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition",
+                          ready
+                            ? "border-white/15 bg-white/10 text-white hover:bg-white/14"
+                            : "cursor-not-allowed border-white/8 bg-white/5 text-white/35"
+                        )}
+                        disabled={!ready}
+                      >
+                        この内容でChatへ
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={copyDraft}
+                        className="rounded-xl border border-white/12 bg-white/8 px-4 py-3 text-sm font-semibold text-white/85 shadow-sm hover:bg-white/12"
+                      >
+                        下書きをコピー
+                      </button>
+
+                      {/* 退避：旧/newへ（必要なら） */}
+                      <Link
+                        href="/new"
+                        className="rounded-xl border border-white/12 bg-white/8 px-4 py-3 text-sm font-semibold text-white/85 shadow-sm hover:bg-white/12"
+                      >
+                        旧Newへ
+                      </Link>
+                    </div>
+
+                    <div className="text-xs text-white/45">
+                      ※「この内容でChatへ」を押すと、下書きは自動で保存されてChatに引き継がれます。
+                    </div>
+                  </div>
+                </div>
 
                 {/* ✅ 今日のカード（おすすめ） */}
                 <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
