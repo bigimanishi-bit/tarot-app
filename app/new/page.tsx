@@ -53,6 +53,7 @@ const PRESETS = [
     desc: "現状/本音/ブロック/行動/未来",
     spread: "five_feelings" as SpreadKey,
     tone: "direct" as ToneKey,
+    // ✅ APIのcardsTextにそのまま投げる想定（「カード一覧」欄にユーザーが入力）
     text:
       "【恋愛】相手の気持ち\n" +
       "状況を簡潔に：\n\n" +
@@ -86,9 +87,9 @@ const PRESETS = [
   },
 ];
 
-type GenerateResponse =
-  | { ok: true; text: string }
-  | { ok: false; error: string };
+type GenerateOk = { ok: true; text: string; prompt_updated_at?: string | null };
+type GenerateNg = { ok: false; message?: string };
+type GenerateResp = GenerateOk | GenerateNg;
 
 export default function NewPage() {
   const router = useRouter();
@@ -111,7 +112,7 @@ export default function NewPage() {
   const [draft, setDraft] = useState(preset.text);
   const [err, setErr] = useState<string | null>(null);
 
-  // ✅ 一時鑑定（ワンショット）の結果
+  // ✅ 一時鑑定の結果（ここで完結）
   const [generating, setGenerating] = useState(false);
   const [resultText, setResultText] = useState<string | null>(null);
 
@@ -119,7 +120,6 @@ export default function NewPage() {
     () => SPREADS.find((s) => s.key === spread)?.label ?? spread,
     [spread]
   );
-
   const toneLabel =
     tone === "warm" ? "やわらかめ" : tone === "neutral" ? "ニュートラル" : "はっきり";
 
@@ -130,7 +130,7 @@ export default function NewPage() {
     setResultText(null);
   }, [preset.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 1) scope 必須（Welcomeで選ぶ）
+  // 1) scope 必須
   useEffect(() => {
     const sc = loadScope();
     if (!isScopeReady(sc)) {
@@ -211,51 +211,49 @@ export default function NewPage() {
     }
   }
 
-  // ✅ /api/generate で一時鑑定（質問は返さない前提）
+  async function copyText(s: string) {
+    try {
+      await navigator.clipboard.writeText(s);
+    } catch {}
+  }
+
+  // ✅ 一時鑑定（AIから質問はしない）
   async function generateOnce() {
-    if (!scope) return;
     setErr(null);
     setGenerating(true);
     setResultText(null);
 
     try {
-      // 「AIから質問しない」要求を明示（サーバ側が無視しても、プロンプトに混ぜて抑止）
-      const noQuestionGuard =
-        "\n\n【ルール】AIはユーザーに追加質問をしない。断定予言は避け、読みやすい鑑定文で完結させる。";
+      // theme/title は今の /api/generate の仕様に合わせる
+      const theme = scopeLabel(scope); // 表示用でもOK
+      const title = `New / ${deckKey} / ${spreadLabel} / ${toneLabel}`;
+
+      // ✅ “質問しない”を cardsText に明示（readingGenerator側がプロンプトで抑制できる）
+      const guard =
+        "\n\n【ルール】AIはユーザーに追加質問をしない。鑑定文だけで完結させる。";
 
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          deckKey,
-          spread,
-          tone,
-          scope,
-          draft: (draft ?? "") + noQuestionGuard,
-          mode: "one_shot",
-          no_questions: true,
+          theme,
+          title,
+          mode: "normal",
+          cardsText: String(draft ?? "") + guard,
         }),
       });
 
-      const data = (await res.json().catch(() => null)) as any;
-
-      // よくある形を吸収（text/result_text/messageなど）
-      const text =
-        data?.text ??
-        data?.result_text ??
-        data?.message ??
-        data?.result ??
-        (typeof data === "string" ? data : null);
+      const data = (await res.json().catch(() => null)) as GenerateResp | null;
 
       if (!res.ok) {
-        const msg = data?.error ?? data?.message ?? `生成に失敗しました（${res.status}）`;
+        const msg = (data as any)?.message ?? `生成に失敗しました（${res.status}）`;
         throw new Error(msg);
       }
-      if (!text || typeof text !== "string") {
+      if (!data || (data as any).ok !== true || typeof (data as any).text !== "string") {
         throw new Error("生成結果の形式が想定と違います（text が見つかりません）");
       }
 
-      setResultText(text);
+      setResultText((data as GenerateOk).text);
     } catch (e: any) {
       setErr(e?.message ?? "生成に失敗しました");
       setResultText(null);
@@ -264,7 +262,7 @@ export default function NewPage() {
     }
   }
 
-  // ✅ 質問・補足があるときだけ Chatへ（相談文＋結果＋設定を引き継ぐ）
+  // ✅ 補足疑問が出たときだけ Chatへ（相談文＋結果＋設定を引き継ぐ）
   function goChatWithContext() {
     try {
       localStorage.setItem(
@@ -275,7 +273,6 @@ export default function NewPage() {
           tone,
           draft,
           createdAt: Date.now(),
-          // 追加情報（Chatが無視してもOK）
           initialReadingText: resultText ?? null,
           scope,
         })
@@ -284,17 +281,10 @@ export default function NewPage() {
     router.push("/chat");
   }
 
-  // ✅ このページで終わり（結果だけ消す/相談文は残す）
+  // ✅ ここで終わり（結果だけ消す／相談文は残す）
   function finishHere() {
     setResultText(null);
     setErr(null);
-    // draft は残す（あとからまた鑑定したい時のため）
-  }
-
-  async function copyText(s: string) {
-    try {
-      await navigator.clipboard.writeText(s);
-    } catch {}
   }
 
   if (!scope) {
@@ -505,7 +495,7 @@ export default function NewPage() {
                   <div>
                     <div className="text-sm font-semibold text-white/90">相談文</div>
                     <div className="mt-2 text-xs text-white/55">
-                      ここで一時鑑定まで完結。追加の疑問が出たときだけChatへ進みます。
+                      ここで一時鑑定まで完結。補足疑問が出たときだけChatへ進みます。
                     </div>
                   </div>
 
@@ -531,13 +521,6 @@ export default function NewPage() {
                     >
                       下書きコピー
                     </button>
-
-                    <Link
-                      href="/chat"
-                      className="rounded-xl border border-white/12 bg-white/8 px-4 py-3 text-sm font-semibold text-white/85 shadow-sm hover:bg-white/12"
-                    >
-                      Chatへ（直接）
-                    </Link>
                   </div>
                 </div>
 
@@ -552,7 +535,6 @@ export default function NewPage() {
                 </div>
               </div>
 
-              {/* 結果 */}
               <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm sm:p-6">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -585,7 +567,7 @@ export default function NewPage() {
                         onClick={goChatWithContext}
                         className="rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-white/14"
                       >
-                        質問がある→Chatへ
+                        補足がある→Chatへ
                       </button>
                     </div>
                   ) : (
