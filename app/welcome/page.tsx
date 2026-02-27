@@ -151,13 +151,17 @@ function cardImageSrc(name: string): string {
 
 // ---- Mini fortune (simple, fast) ----
 function dailyMiniFortune(names: string[]): string {
-  const key = (names?.[0] ?? "").toLowerCase();
+  const a = (names?.[0] ?? "").toLowerCase();
+  const b = (names?.[1] ?? "").toLowerCase();
+  const c = (names?.[2] ?? "").toLowerCase();
+  const s = `${a} ${b} ${c}`;
 
-  if (key.includes("five of cups"))
-    return "今日は「失ったもの」に気持ちが引っ張られやすい日。残ってるものを一つ拾うと流れが戻る。";
-  if (key.includes("three of swords"))
-    return "今日は心がチクッとしやすい日。無理に元気を作らず、距離を取って休憩が吉。";
-  if (key.includes("king of cups"))
+  // ざっくり：ネガ→整える / 回復 / 落ち着き
+  if (s.includes("three of swords"))
+    return "今日は心がチクッとしやすい。無理に元気を作らず、距離を取って整えるほど回復が早い。";
+  if (s.includes("five of cups"))
+    return "今日は「失ったもの」に意識が引っ張られやすい。残ってるものを一つ拾うと流れが戻る。";
+  if (s.includes("king of cups"))
     return "今日は落ち着きが武器。感情を抱え込みすぎず、静かに整えるほど強い。";
 
   return "今日は「気持ちの整理」と「ペース調整」がテーマ。焦らず、一つずつ。";
@@ -427,6 +431,32 @@ export default function WelcomePage() {
         : "cursor-not-allowed border-white/8 bg-white/5 !text-white/60"
     );
 
+  // 天気表示（今日の3枚枠の中で使う）
+  const WeatherChip = () => (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80">
+      <div className="flex items-center gap-2">
+        <span className="text-white/55">天気</span>
+        {weatherErr ? (
+          <span className="text-white/55">–</span>
+        ) : !weather ? (
+          <span className="text-white/55">取得中…</span>
+        ) : (
+          <span className="text-white/85">
+            {weather.locationLabel} / {weather.weatherLabel ?? "—"}
+            {weather.currentTempC != null ? ` / ${Math.round(weather.currentTempC)}℃` : ""}
+          </span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 text-white/70">
+        <span className="text-white/40">月</span>
+        <span className="text-white/75">
+          {moonEmoji(moonAge)} {moonPhaseLabel(moonAge)} / {moonAge.toFixed(1)}日
+        </span>
+      </div>
+    </div>
+  );
+
   return (
     <main className="min-h-screen">
       <div className="relative min-h-screen overflow-hidden bg-[#0B1020]">
@@ -468,21 +498,6 @@ export default function WelcomePage() {
                     招待制 / Invite only
                   </span>
                 </Link>
-
-                {/* 天気：ヘッダー内 */}
-                <div className="hidden items-center gap-2 rounded-full border border-white/12 bg-white/8 px-3 py-1 text-xs font-semibold !text-white/85 md:inline-flex">
-                  <span className="text-white/60">天気</span>
-                  {weatherErr ? (
-                    <span className="text-white/55">–</span>
-                  ) : !weather ? (
-                    <span className="text-white/55">取得中…</span>
-                  ) : (
-                    <span className="text-white/85">
-                      {weather.weatherLabel ?? "—"}
-                      {weather.currentTempC != null ? ` / ${Math.round(weather.currentTempC)}℃` : ""}
-                    </span>
-                  )}
-                </div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -504,7 +519,7 @@ export default function WelcomePage() {
           {/* HERO：カード主役（中央） */}
           <header className="mb-6 md:mb-10">
             <div className="mx-auto max-w-[760px]">
-              {/* 上：小さめ見出し（Welcomeを縮小） */}
+              {/* 見出し（小さめ） */}
               <div className="mb-4 text-center">
                 <h1
                   className="text-2xl tracking-tight text-white md:text-3xl"
@@ -521,24 +536,21 @@ export default function WelcomePage() {
                 </p>
               </div>
 
-              {/* 中央：今日の3枚（主役） */}
+              {/* 中央：今日の3枚（主役）＋天気を同枠へ */}
               <div className="rounded-[30px] border border-white/12 bg-white/6 p-4 shadow-[0_40px_140px_rgba(0,0,0,0.60)] backdrop-blur-2xl">
                 <div className="rounded-[26px] border border-white/10 bg-white/7 p-4">
                   <div className="flex items-end justify-between gap-3">
                     <div>
                       <div className="text-xs font-semibold tracking-[0.18em] text-white/60">
-                        TODAY CARDS
+                        TODAY
                       </div>
                       <div className="mt-1 text-base font-semibold text-white/90">今日の3枚</div>
                     </div>
+                  </div>
 
-                    {/* 右上：MOON（主役じゃないので軽く） */}
-                    <div className="hidden items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/75 md:flex">
-                      <span className="text-white/55">MOON</span>
-                      <span className="text-white/80">
-                        {moonEmoji(moonAge)} {moonPhaseLabel(moonAge)} / {moonAge.toFixed(1)}日
-                      </span>
-                    </div>
+                  {/* ✅ 天気＆月齢：同じ枠の中 */}
+                  <div className="mt-3">
+                    <WeatherChip />
                   </div>
 
                   {!dailyCards ? (
@@ -547,7 +559,7 @@ export default function WelcomePage() {
                     </div>
                   ) : (
                     <>
-                      {/* カード：1.5倍。全体表示（contain） */}
+                      {/* カード：大きめ＆全体表示（contain） */}
                       <div className="mt-4 grid grid-cols-3 gap-3">
                         {dailyCards.slice(0, 3).map((name, i) => (
                           <div
@@ -564,7 +576,6 @@ export default function WelcomePage() {
                                 }}
                               />
                             </div>
-
                             <div className="mt-2 text-xs text-white/75">
                               {i + 1}: {name}
                             </div>
@@ -572,29 +583,9 @@ export default function WelcomePage() {
                         ))}
                       </div>
 
-                      {/* ミニ鑑定（簡単な占い） */}
+                      {/* ✅ 簡単な占い一文 */}
                       <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-6 text-white/80">
                         {dailyMiniFortune(dailyCards)}
-                      </div>
-
-                      {/* 今日を読む */}
-                      <div className="mt-3">
-                        <Link
-                          href="/new"
-                          className={primaryBtn(ready)}
-                          aria-disabled={!ready}
-                          onClick={(e) => {
-                            if (!ready) e.preventDefault();
-                          }}
-                        >
-                          今日を読む
-                        </Link>
-
-                        {!ready ? (
-                          <div className="mt-2 text-xs text-white/50">
-                            ※「自分」か「カルテ」を選ぶと押せます
-                          </div>
-                        ) : null}
                       </div>
 
                       <div className="mt-3 text-[11px] text-white/45">
@@ -836,18 +827,6 @@ export default function WelcomePage() {
           </section>
 
           <div className="h-10" />
-        </div>
-
-        {/* 月齢：右下固定（保険として残す：モバイルではここが見やすい） */}
-        <div className="fixed bottom-4 right-4 z-40 w-[220px] rounded-2xl border border-white/12 bg-white/6 p-4 text-white shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-2xl md:hidden">
-          <div className="text-xs font-semibold tracking-[0.18em] text-white/60">MOON</div>
-          <div className="mt-2 flex items-center justify-between">
-            <div className="text-sm font-semibold text-white/90">月齢</div>
-            <div className="text-xs text-white/60">
-              {moonEmoji(moonAge)} {moonPhaseLabel(moonAge)}
-            </div>
-          </div>
-          <div className="mt-2 text-sm text-white/85">月齢 {moonAge.toFixed(1)} 日</div>
         </div>
       </div>
     </main>
