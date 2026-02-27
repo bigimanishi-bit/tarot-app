@@ -15,6 +15,37 @@ function clsx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
 }
 
+// ★追加：cookieから ts_device_id を読む
+function getCookie(name: string) {
+  if (typeof document === "undefined") return null;
+  const m = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+  return m ? decodeURIComponent(m[2]) : null;
+}
+
+// ★追加：ログイン成功後に user_id/email × device_id を固定
+async function bindDeviceAfterLogin() {
+  try {
+    const { data } = await supabase.auth.getUser();
+    const user = data?.user;
+    if (!user?.id) return;
+
+    const device_id = getCookie("ts_device_id");
+    if (!device_id) return;
+
+    await fetch("/api/audit/bind-device", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        user_id: user.id,
+        email: user.email ?? null,
+        device_id,
+      }),
+    });
+  } catch {
+    // noop
+  }
+}
+
 export default function LoginPage() {
   const router = useRouter();
 
@@ -84,6 +115,9 @@ export default function LoginPage() {
       setLoading(false);
       return;
     }
+
+    // ★追加：ログイン成立したら “固定” を先に実行（失敗してもログインは続行）
+    await bindDeviceAfterLogin();
 
     setMessage("ログインしました。Welcomeへ移動します…");
     router.replace("/welcome");
@@ -174,7 +208,7 @@ export default function LoginPage() {
                 textShadow: "0 10px 40px rgba(0,0,0,0.55)",
               }}
             >
-              Tarot Studio          
+              Tarot Studio
             </h1>
             <p className="mt-3 max-w-xl text-sm leading-7 text-white/75 md:text-base">
               カードの声は、静か刺さる。<br className="hidden md:block" />
@@ -186,7 +220,7 @@ export default function LoginPage() {
           <section className="rounded-[30px] border border-white/12 bg-white/6 p-3 shadow-[0_40px_120px_rgba(0,0,0,0.55)] backdrop-blur-2xl sm:p-4 md:p-6">
             {/* ✅ モバイルは1カラム、md以上で2カラム */}
             <div className="grid gap-4 md:grid-cols-2 md:gap-6">
-              {/* 左：世界観（モバイルでは少し短めに見えるサイズ） */}
+              {/* 左：世界観 */}
               <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm md:p-6">
                 <div className="mb-5 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
@@ -225,7 +259,7 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              {/* 右：ログイン（モバイル押しやすく） */}
+              {/* 右：ログイン */}
               <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm md:p-6">
                 <div className="mb-5">
                   <h3 className="text-2xl font-semibold text-white">入室</h3>
