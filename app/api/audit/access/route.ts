@@ -19,22 +19,6 @@ function todayJstDateString() {
   return jst.toISOString().slice(0, 10);
 }
 
-function parseIps(req: Request) {
-  const xff = (req.headers.get("x-forwarded-for") || "").trim();
-
-  const first = xff.split(",")[0]?.trim();
-  const ip_client = first ? first : null;
-
-  const xri = req.headers.get("x-real-ip")?.trim();
-  const ip_proxy = xri ? xri : null;
-
-  return {
-    xff: xff || null,
-    ip_client,
-    ip_proxy,
-  };
-}
-
 function isUuid(v: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     v
@@ -79,22 +63,26 @@ export async function POST(req: Request) {
       todayJstDateString();
 
     const p = normPath(body?.path);
-
     const ua = req.headers.get("user-agent") || null;
 
-    // 追加: IPを分解して保存（切り分け用）
-    const { xff, ip_client, ip_proxy } = parseIps(req);
+    // middleware から来る値を優先して保存
+    const xff = typeof body?.xff === "string" ? body.xff.trim() : null;
+    const ip_client =
+      typeof body?.ip_client === "string" ? body.ip_client.trim() : null;
+    const ip_proxy =
+      typeof body?.ip_proxy === "string" ? body.ip_proxy.trim() : null;
 
-    // 互換維持: 既存の ip 列は「できるだけユーザー本人のIP」に寄せる
-    const bodyIp =
-      typeof body?.ip === "string" ? body.ip.trim() : "";
-    const ip =
-      bodyIp ||
-      ip_client ||
-      ip_proxy ||
-      "unknown";
+    const vercel_country =
+      typeof body?.vercel_country === "string" ? body.vercel_country.trim() : null;
+    const vercel_region =
+      typeof body?.vercel_region === "string" ? body.vercel_region.trim() : null;
+    const vercel_city =
+      typeof body?.vercel_city === "string" ? body.vercel_city.trim() : null;
 
-    // device_id が壊れてても止めない（uuid必須のDBなので生成して入れる）
+    // 互換維持: ip列は ip_client を最優先
+    const bodyIp = typeof body?.ip === "string" ? body.ip.trim() : "";
+    const ip = bodyIp || ip_client || ip_proxy || "unknown";
+
     const safeDeviceId = isUuid(device_id)
       ? device_id
       : (globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : null);
@@ -117,7 +105,7 @@ export async function POST(req: Request) {
           timezone = geo.location?.time_zone ?? null;
         }
       } catch {
-        // mmdb読めない/未配置 → nullのまま続行
+        // noop
       }
     }
 
@@ -145,10 +133,15 @@ export async function POST(req: Request) {
       postal,
       timezone,
 
-      // 追加: 切り分け用の3点セット
+      // IP切り分け
       xff,
       ip_client,
       ip_proxy,
+
+      // Vercel Geo（追加）
+      vercel_country,
+      vercel_region,
+      vercel_city,
     });
 
     if (error) {

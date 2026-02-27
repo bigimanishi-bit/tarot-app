@@ -9,7 +9,6 @@ function getOrCreateDeviceId(req: NextRequest) {
   const existing = req.cookies.get("ts_device_id")?.value;
   if (existing) return { deviceId: existing, isNew: false };
 
-  // Edgeでも使えるUUID生成
   const deviceId = crypto.randomUUID();
   return { deviceId, isNew: true };
 }
@@ -22,26 +21,31 @@ function pickClientIp(req: NextRequest) {
   const first = xff.split(",")[0]?.trim();
   const ip_client = first || cfc || xri || null;
 
-  // “プロキシ側”として保持（参考用）
   const ip_proxy = xri || cfc || null;
 
   return { xff: xff || null, ip_client, ip_proxy };
 }
 
+function pickVercelGeo(req: NextRequest) {
+  const vercel_country = (req.headers.get("x-vercel-ip-country") || "").trim();
+  const vercel_region = (req.headers.get("x-vercel-ip-country-region") || "").trim();
+  const vercel_city = (req.headers.get("x-vercel-ip-city") || "").trim();
+
+  return {
+    vercel_country: vercel_country || null,
+    vercel_region: vercel_region || null,
+    vercel_city: vercel_city || null,
+  };
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // 対象外は何もしない
-  if (!isTargetPath(pathname)) {
-    return NextResponse.next();
-  }
+  if (!isTargetPath(pathname)) return NextResponse.next();
 
   const { deviceId, isNew } = getOrCreateDeviceId(req);
-
-  // レスポンス準備
   const res = NextResponse.next();
 
-  // cookie無ければ付与（1年）
   if (isNew) {
     res.cookies.set("ts_device_id", deviceId, {
       httpOnly: false,
@@ -52,15 +56,14 @@ export async function middleware(req: NextRequest) {
     });
   }
 
-  // 追加：IP候補を middleware 側で拾って API に渡す
   const { xff, ip_client, ip_proxy } = pickClientIp(req);
+  const { vercel_country, vercel_region, vercel_city } = pickVercelGeo(req);
 
-  // 監査ログPOST（失敗しても止めない）
   try {
     const url = new URL("/api/audit/access", req.url);
-    const created_day = new Date(
-      Date.now() + 9 * 60 * 60 * 1000
-    ).toISOString().slice(0, 10);
+    const created_day = new Date(Date.now() + 9 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
 
     await fetch(url, {
       method: "POST",
@@ -70,11 +73,18 @@ export async function middleware(req: NextRequest) {
         path: pathname,
         device_id: deviceId,
 
-        // ★ここが本命：Edgeで見えてる “本当のクライアントIP候補” を渡す
-        ip: ip_client,      // 互換用（既存ip列に入る想定）
+        // 互換用
+        ip: ip_client,
+
+        // IP切り分け
         xff,
         ip_client,
         ip_proxy,
+
+        // Vercel Geo
+        vercel_country,
+        vercel_region,
+        vercel_city,
       }),
     });
   } catch {
