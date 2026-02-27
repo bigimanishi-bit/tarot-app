@@ -517,13 +517,13 @@ export default function WelcomePage() {
               </p>
             </div>
 
-            {/* ✅ 今日の3枚：そのまま（右上） */}
-            <div className="rounded-[26px] border border-white/12 bg-white/6 p-4 shadow-[0_30px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
-              <div className="rounded-2xl border border-white/10 bg-white/7 p-4 text-white">
-                <div className="text-xs font-semibold tracking-[0.18em] text-white/60">
+            {/* ✅             {/* ✅ 今日の3枚：小さめ + 全体表示（トリミング無し） */}
+            <div className="rounded-[22px] border border-white/12 bg-white/6 p-3 shadow-[0_30px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
+              <div className="rounded-2xl border border-white/10 bg-white/7 p-3 text-white">
+                <div className="text-[11px] font-semibold tracking-[0.18em] text-white/60">
                   TODAY CARDS
                 </div>
-                <div className="mt-2 text-sm font-semibold text-white/90">今日の3枚</div>
+                <div className="mt-1 text-sm font-semibold text-white/90">今日の3枚</div>
 
                 {!dailyCards ? (
                   <div className="mt-2 text-sm text-white/60">（まだありません）</div>
@@ -531,22 +531,30 @@ export default function WelcomePage() {
                   <>
                     <div className="mt-3 grid grid-cols-3 gap-2">
                       {dailyCards.slice(0, 3).map((name, i) => (
-                        <div key={i} className="rounded-xl border border-white/10 bg-black/20 p-1">
-                          <img
-                            src={cardImageSrc(name)}
-                            alt={name}
-                            className="h-[98px] w-full rounded-lg object-cover"
-                            onError={(e) => {
-                              (e.currentTarget as HTMLImageElement).style.display = "none";
-                            }}
-                          />
-                          <div className="mt-1 text-[11px] leading-4 text-white/75">
+                        <div
+                          key={i}
+                          className="rounded-xl border border-white/10 bg-black/20 p-2"
+                        >
+                          {/* カード枠：小さく固定。画像はcontainで全体表示 */}
+                          <div className="flex items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white/5">
+                            <img
+                              src={cardImageSrc(name)}
+                              alt={name}
+                              className="h-[68px] w-[50px] object-contain"
+                              onError={(e) => {
+                                (e.currentTarget as HTMLImageElement).style.display = "none";
+                              }}
+                            />
+                          </div>
+
+                          <div className="mt-1 text-[10px] leading-4 text-white/75">
                             {i + 1}: {name}
                           </div>
                         </div>
                       ))}
                     </div>
-                    <div className="mt-2 text-[11px] text-white/45">
+
+                    <div className="mt-2 text-[10px] text-white/45">
                       ※画像は /public/cards/rws/ に配置すると表示されます
                     </div>
                   </>
