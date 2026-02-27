@@ -30,6 +30,73 @@ function clsx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
 }
 
+type WeatherView = {
+  locationLabel: string;
+  currentTempC: number | null;
+  todayMaxC: number | null;
+  todayMinC: number | null;
+  weatherLabel: string | null;
+};
+
+function weatherCodeLabel(code: number | null | undefined): string | null {
+  if (code == null) return null;
+  // Open-Meteo weathercode
+  if (code === 0) return "快晴";
+  if (code === 1) return "晴れ";
+  if (code === 2) return "薄曇り";
+  if (code === 3) return "曇り";
+  if (code === 45 || code === 48) return "霧";
+  if (code === 51 || code === 53 || code === 55) return "霧雨";
+  if (code === 56 || code === 57) return "凍雨";
+  if (code === 61 || code === 63 || code === 65) return "雨";
+  if (code === 66 || code === 67) return "強い雨";
+  if (code === 71 || code === 73 || code === 75) return "雪";
+  if (code === 77) return "雪（細かい）";
+  if (code === 80 || code === 81 || code === 82) return "にわか雨";
+  if (code === 85 || code === 86) return "にわか雪";
+  if (code === 95) return "雷雨";
+  if (code === 96 || code === 99) return "雷雨（ひょう）";
+  return "天気";
+}
+
+async function fetchWeather(lat: number, lon: number): Promise<WeatherView> {
+  const url =
+    "https://api.open-meteo.com/v1/forecast" +
+    `?latitude=${encodeURIComponent(lat)}` +
+    `&longitude=${encodeURIComponent(lon)}` +
+    `&current=temperature_2m,weather_code` +
+    `&daily=temperature_2m_max,temperature_2m_min,weather_code` +
+    `&timezone=${encodeURIComponent("Asia/Tokyo")}`;
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`weather ${res.status}`);
+  const j = await res.json();
+
+  const curTemp = typeof j?.current?.temperature_2m === "number" ? j.current.temperature_2m : null;
+  const curCode = typeof j?.current?.weather_code === "number" ? j.current.weather_code : null;
+
+  const max0 =
+    Array.isArray(j?.daily?.temperature_2m_max) && typeof j.daily.temperature_2m_max[0] === "number"
+      ? j.daily.temperature_2m_max[0]
+      : null;
+  const min0 =
+    Array.isArray(j?.daily?.temperature_2m_min) && typeof j.daily.temperature_2m_min[0] === "number"
+      ? j.daily.temperature_2m_min[0]
+      : null;
+  const dCode0 =
+    Array.isArray(j?.daily?.weather_code) && typeof j.daily.weather_code[0] === "number"
+      ? j.daily.weather_code[0]
+      : null;
+
+  return {
+    locationLabel: "現在地",
+    currentTempC: curTemp,
+    todayMaxC: max0,
+    todayMinC: min0,
+    weatherLabel: weatherCodeLabel(curCode ?? dCode0),
+  };
+}
+
 export default function WelcomePage() {
   const router = useRouter();
 
@@ -47,6 +114,10 @@ export default function WelcomePage() {
 
   // ✅ 今日のおすすめカード（3枚）
   const [dailyCards, setDailyCards] = useState<string[] | null>(null);
+
+  // ✅ 天気
+  const [weather, setWeather] = useState<WeatherView | null>(null);
+  const [weatherErr, setWeatherErr] = useState<string | null>(null);
 
   // 新規登録フォーム
   const [newName, setNewName] = useState("");
@@ -139,6 +210,56 @@ export default function WelcomePage() {
     };
   }, [router]);
 
+  // ✅ 天気取得（許可があれば現在地 / ダメなら東京）
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      setWeatherErr(null);
+      try {
+        // まずは現在地
+        const getPos = () =>
+          new Promise<GeolocationPosition>((resolve, reject) => {
+            if (!navigator.geolocation) return reject(new Error("no geolocation"));
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: false,
+              timeout: 6000,
+              maximumAge: 10 * 60 * 1000,
+            });
+          });
+
+        let lat = 35.681236; // fallback Tokyo
+        let lon = 139.767125;
+
+        try {
+          const pos = await getPos();
+          lat = pos.coords.latitude;
+          lon = pos.coords.longitude;
+        } catch {
+          // fallback Tokyo
+        }
+
+        const w = await fetchWeather(lat, lon);
+        if (cancelled) return;
+
+        // fallback東京だった場合はラベルを変える
+        if (Math.abs(lat - 35.681236) < 0.01 && Math.abs(lon - 139.767125) < 0.01) {
+          w.locationLabel = "東京";
+        }
+
+        setWeather(w);
+      } catch (e: any) {
+        if (cancelled) return;
+        setWeather(null);
+        setWeatherErr(e?.message ?? "weather error");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
     if (!t) return profiles;
@@ -202,7 +323,6 @@ export default function WelcomePage() {
         return;
       }
 
-      // client_code は DB側で作ってるなら不要。作ってないならここで適当に生成。
       const clientCode = `C-${new Date()
         .toISOString()
         .replace(/[-:TZ.]/g, "")
@@ -232,7 +352,6 @@ export default function WelcomePage() {
       setNewRel("");
       setNewMemo("");
 
-      // 登録したらそのまま“選択状態”に（確定ボタン不要）
       chooseClient(row);
     } catch (e: any) {
       setErr(e?.message ?? "作成に失敗しました");
@@ -251,7 +370,6 @@ export default function WelcomePage() {
 
   return (
     <main className="min-h-screen">
-      {/* 背景：loginと同じ夜空系 */}
       <div className="relative min-h-screen overflow-hidden bg-[#0B1020]">
         <div
           className="pointer-events-none absolute inset-0"
@@ -274,7 +392,6 @@ export default function WelcomePage() {
           }}
         />
 
-        {/* sticky header（PCでスクロールしても残る） */}
         <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/55 backdrop-blur-xl">
           <div className="mx-auto max-w-6xl px-4 py-3 md:px-6">
             <div className="flex items-center justify-between gap-3">
@@ -316,32 +433,84 @@ export default function WelcomePage() {
         </div>
 
         <div className="relative mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-12">
-          {/* タイトル */}
-          <header className="mb-6 md:mb-10">
-            <h1
-              className="text-4xl tracking-tight text-white md:text-6xl"
-              style={{
-                fontFamily:
-                  'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
-                textShadow: "0 10px 40px rgba(0,0,0,0.55)",
-              }}
-            >
-              Welcome
-            </h1>
-            <p className="mt-3 max-w-2xl text-sm leading-7 text-white/75 md:text-base">
-              ここでだけ、鑑定の“入れ物”を選びます。<br className="hidden md:block" />
-              以降のページは自動で同じ入れ物を使い、混ざりません（プライバシー保護）。
-            </p>
+          {/* ✅ ヘッダー：左（タイトル）＋右（今日の3枚＆天気） */}
+          <header className="mb-6 grid gap-4 md:mb-10 md:grid-cols-[1fr_360px] md:items-start md:gap-6">
+            <div>
+              <h1
+                className="text-4xl tracking-tight text-white md:text-6xl"
+                style={{
+                  fontFamily:
+                    'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+                  textShadow: "0 10px 40px rgba(0,0,0,0.55)",
+                }}
+              >
+                Welcome
+              </h1>
+              <p className="mt-3 max-w-2xl text-sm leading-7 text-white/75 md:text-base">
+                ここでだけ、鑑定の“入れ物”を選びます。<br className="hidden md:block" />
+                以降のページは自動で同じ入れ物を使い、混ざりません（プライバシー保護）。
+              </p>
+            </div>
+
+            {/* ✅ 赤丸の位置：右上カード */}
+            <div className="rounded-[26px] border border-white/12 bg-white/6 p-4 shadow-[0_30px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
+              <div className="grid gap-3">
+                <div className="rounded-2xl border border-white/10 bg-white/7 p-4">
+                  <div className="text-xs font-semibold tracking-[0.18em] text-white/60">
+                    TODAY CARDS
+                  </div>
+                  <div className="mt-2 text-sm font-semibold text-white/85">今日の3枚</div>
+
+                  {!dailyCards ? (
+                    <div className="mt-2 text-sm text-white/60">（まだありません）</div>
+                  ) : (
+                    <ul className="mt-2 space-y-1 text-sm text-white/80">
+                      <li>1: {dailyCards[0]}</li>
+                      <li>2: {dailyCards[1]}</li>
+                      <li>3: {dailyCards[2]}</li>
+                    </ul>
+                  )}
+                </div>
+
+                <div className="rounded-2xl border border-white/10 bg-white/7 p-4">
+                  <div className="text-xs font-semibold tracking-[0.18em] text-white/60">
+                    WEATHER
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <div className="text-sm font-semibold text-white/85">天気</div>
+                    <div className="text-xs text-white/55">{weather?.locationLabel ?? "…"}</div>
+                  </div>
+
+                  {weatherErr ? (
+                    <div className="mt-2 text-sm text-white/60">（取得できませんでした）</div>
+                  ) : !weather ? (
+                    <div className="mt-2 text-sm text-white/60">取得中…</div>
+                  ) : (
+                    <div className="mt-2 grid gap-1 text-sm text-white/80">
+                      <div>
+                        {weather.weatherLabel ?? "天気"}{" "}
+                        {weather.currentTempC != null ? ` / ${Math.round(weather.currentTempC)}℃` : ""}
+                      </div>
+                      <div className="text-xs text-white/60">
+                        今日：{weather.todayMaxC != null ? `${Math.round(weather.todayMaxC)}℃` : "–"} /{" "}
+                        {weather.todayMinC != null ? `${Math.round(weather.todayMinC)}℃` : "–"}
+                      </div>
+                      <div className="text-[11px] text-white/45">
+                        ※位置情報OFFの場合は東京で表示
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </header>
 
-          {/* エラー */}
           {err ? (
             <div className="mb-4 rounded-2xl border border-rose-300/20 bg-rose-500/10 px-5 py-4 text-sm text-rose-100">
               {err}
             </div>
           ) : null}
 
-          {/* メイン（ガラス） */}
           <section className="rounded-[30px] border border-white/12 bg-white/6 p-3 shadow-[0_40px_120px_rgba(0,0,0,0.55)] backdrop-blur-2xl sm:p-4 md:p-6">
             <div className="grid gap-4 md:grid-cols-2 md:gap-6">
               {/* 左：スコープ選択 */}
@@ -370,6 +539,11 @@ export default function WelcomePage() {
                   <button onClick={chooseSelf} className={primaryBtn(true)} type="button">
                     自分をみる（セルフ鑑定）
                   </button>
+
+                  {/* ✅ ここ：自分を見るの下にカルテ編集ボタン */}
+                  <Link href="/maintain" className={primaryBtn(true)}>
+                    カルテ編集（Maintain）
+                  </Link>
 
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                     <div className="text-sm font-semibold text-white/85">誰かをみる（カルテ）</div>
@@ -474,7 +648,7 @@ export default function WelcomePage() {
                 </div>
               </div>
 
-              {/* 右：行き先（スコープが決まるまで押せない） */}
+              {/* 右：行き先 */}
               <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm md:p-6">
                 <div className="mb-4">
                   <div className="text-xs font-semibold tracking-[0.18em] text-white/60">
@@ -490,7 +664,6 @@ export default function WelcomePage() {
                   </p>
                 </div>
 
-                {/* ✅ 導線の文言だけ調整 */}
                 <div className="grid gap-3">
                   <Link
                     href="/new"
@@ -552,21 +725,6 @@ export default function WelcomePage() {
                   </div>
                 )}
 
-                {/* ✅ 今日のカード（おすすめ） */}
-                <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4">
-                  <div className="text-sm font-semibold text-white/85">今日のカード（おすすめ）</div>
-
-                  {!dailyCards ? (
-                    <div className="mt-2 text-sm text-white/60">（まだありません）</div>
-                  ) : (
-                    <ul className="mt-2 space-y-1 text-sm text-white/80">
-                      <li>1: {dailyCards[0]}</li>
-                      <li>2: {dailyCards[1]}</li>
-                      <li>3: {dailyCards[2]}</li>
-                    </ul>
-                  )}
-                </div>
-
                 <div className="mt-6 flex items-center justify-between text-xs text-white/45">
                   <span>Tarot Studio / private beta</span>
                   <span>静かに、深く。</span>
@@ -581,6 +739,31 @@ export default function WelcomePage() {
     </main>
   );
 }
+
+function Stars() {
+  return (
+    <div
+      className="pointer-events-none absolute inset-0 opacity-70"
+      style={{
+        backgroundImage:
+          "radial-gradient(circle at 12% 18%, rgba(255,255,255,0.22) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 28% 46%, rgba(255,255,255,0.18) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 44% 22%, rgba(255,255,255,0.16) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 62% 18%, rgba(255,255,255,0.20) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 78% 32%, rgba(255,255,255,0.15) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 88% 58%, rgba(255,255,255,0.14) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 24% 78%, rgba(255,255,255,0.14) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 54% 82%, rgba(255,255,255,0.12) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 82% 86%, rgba(255,255,255,0.12) 0 1px, transparent 2px)," +
+          "radial-gradient(circle at 18% 32%, rgba(255,255,255,0.22) 0 1.5px, transparent 3px)," +
+          "radial-gradient(circle at 70% 48%, rgba(255,255,255,0.18) 0 1.5px, transparent 3px)," +
+          "radial-gradient(circle at 40% 64%, rgba(255,255,255,0.16) 0 1.5px, transparent 3px)," +
+          "radial-gradient(circle at 64% 28%, rgba(255,255,255,0.18) 0 2px, transparent 4px)",
+        filter: "blur(0.2px)",
+      }}
+    />
+  );
+}  
 
 function Stars() {
   return (
