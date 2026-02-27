@@ -209,68 +209,94 @@ useEffect(() => {
   }
 
   async function send() {
-    if (sending) return;
-    const text = input.trim();
-    if (!text) return;
-    if (!scope) return;
+  if (sending) return;
+  const text = input.trim();
+  if (!text) return;
+  if (!scope) return;
 
-    const userMsg: ChatMsg = {
-      id: makeId(),
-      role: "user",
-      text,
-      createdAt: Date.now(),
-    };
+  const userMsg: ChatMsg = {
+    id: makeId(),
+    role: "user",
+    text,
+    createdAt: Date.now(),
+  };
 
-    setMessages((prev) => [...prev, userMsg]);
-    setInput("");
-    setSending(true);
-    setStatus("sending...");
+  setMessages((prev) => [...prev, userMsg]);
+  setInput("");
+  setSending(true);
+  setStatus("sending...");
 
-    // ✅ ここは「APIがあれば返す / なければ落ちない」実装
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          message: text,
-          scope,
-        }),
-      });
-
-      if (!res.ok) {
-        throw new Error(`api error: ${res.status}`);
-      }
-
-      const data = (await res.json()) as { reply?: string };
-      const reply = (data.reply ?? "").trim();
-
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: makeId(),
-          role: "assistant",
-          text: reply || "（返答が空でした）",
-          createdAt: Date.now(),
-        },
-      ]);
-      setStatus("ok");
-    } catch (e: any) {
-      // API が未実装/落ちても UI は壊さない
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: makeId(),
-          role: "assistant",
-          text:
-            "（ここは相談UIだけ先に整えてます）\n/api/chat がまだ無い or エラーなので、まずAPI側をつなげよう。",
-          createdAt: Date.now(),
-        },
-      ]);
-      setStatus(e?.message ?? "error");
-    } finally {
-      setSending(false);
+  try {
+    // ✅ Supabaseのaccess tokenを取ってBearerで渡す（APIが必須）
+    const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token ?? null;
+    if (sessionErr || !token) {
+      throw new Error("session token is missing");
     }
+
+    // ✅ APIの期待に合わせる（question / deckKey / spread / tone / messages）
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        question: text,
+
+        // 任意（route.ts側が拾う）
+        deckKey: seed?.deckKey ?? null,
+        spread: seed?.spread ?? null,
+        tone: seed?.tone ?? null,
+
+        // 履歴も渡す（route.tsは最後のuser拾えるし、保存にも使える）
+        messages: messages.map((m) => ({
+          role: m.role,
+          content: m.text,
+        })),
+
+        // 保存用のラベル（readingsに入る）
+        theme: scopeLabel(scope),
+        title: "Chat follow-up",
+
+        // 参考として渡してもOK（route.tsは今は未使用だけど害はない）
+        scope,
+      }),
+    });
+
+    const data = (await res.json().catch(() => null)) as any;
+
+    if (!res.ok) {
+      const msg = data?.error ?? data?.message ?? `api error: ${res.status}`;
+      throw new Error(msg);
+    }
+
+    const reply = String(data?.readingText ?? "").trim();
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: makeId(),
+        role: "assistant",
+        text: reply || "（返答が空でした）",
+        createdAt: Date.now(),
+      },
+    ]);
+    setStatus("ok");
+  } catch (e: any) {
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: makeId(),
+        role: "assistant",
+        text: `（送信に失敗）\n${e?.message ?? "error"}`,
+        createdAt: Date.now(),
+      },
+    ]);
+    setStatus(e?.message ?? "error");
+  } finally {
+    setSending(false);
   }
+}
 
   // ✅ 早期returnは Hooks の後ならOK
   if (booting) {
