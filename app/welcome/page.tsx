@@ -26,9 +26,7 @@ type ClientProfileRow = {
   last_reading_at: string | null;
 };
 
-function clsx(...xs: Array<string | false | null | undefined>) {
-  return xs.filter(Boolean).join(" ");
-}
+type ChatScopeLabel = string;
 
 type WeatherView = {
   locationLabel: string;
@@ -38,9 +36,21 @@ type WeatherView = {
   weatherLabel: string | null;
 };
 
+function clsx(...xs: Array<string | false | null | undefined>) {
+  return xs.filter(Boolean).join(" ");
+}
+
+function safeJsonParse<T>(v: string | null): T | null {
+  if (!v) return null;
+  try {
+    return JSON.parse(v) as T;
+  } catch {
+    return null;
+  }
+}
+
 function weatherCodeLabel(code: number | null | undefined): string | null {
   if (code == null) return null;
-  // Open-Meteo weathercode
   if (code === 0) return "快晴";
   if (code === 1) return "晴れ";
   if (code === 2) return "薄曇り";
@@ -72,19 +82,26 @@ async function fetchWeather(lat: number, lon: number): Promise<WeatherView> {
   if (!res.ok) throw new Error(`weather ${res.status}`);
   const j = await res.json();
 
-  const curTemp = typeof j?.current?.temperature_2m === "number" ? j.current.temperature_2m : null;
-  const curCode = typeof j?.current?.weather_code === "number" ? j.current.weather_code : null;
+  const curTemp =
+    typeof j?.current?.temperature_2m === "number" ? j.current.temperature_2m : null;
+  const curCode =
+    typeof j?.current?.weather_code === "number" ? j.current.weather_code : null;
 
   const max0 =
-    Array.isArray(j?.daily?.temperature_2m_max) && typeof j.daily.temperature_2m_max[0] === "number"
+    Array.isArray(j?.daily?.temperature_2m_max) &&
+    typeof j.daily.temperature_2m_max[0] === "number"
       ? j.daily.temperature_2m_max[0]
       : null;
+
   const min0 =
-    Array.isArray(j?.daily?.temperature_2m_min) && typeof j.daily.temperature_2m_min[0] === "number"
+    Array.isArray(j?.daily?.temperature_2m_min) &&
+    typeof j.daily.temperature_2m_min[0] === "number"
       ? j.daily.temperature_2m_min[0]
       : null;
+
   const dCode0 =
-    Array.isArray(j?.daily?.weather_code) && typeof j.daily.weather_code[0] === "number"
+    Array.isArray(j?.daily?.weather_code) &&
+    typeof j.daily.weather_code[0] === "number"
       ? j.daily.weather_code[0]
       : null;
 
@@ -97,6 +114,52 @@ async function fetchWeather(lat: number, lon: number): Promise<WeatherView> {
   };
 }
 
+// ---- Moon age (simple) ----
+function moonAgeDaysJST(now = new Date()): number {
+  // 2024-01-11 20:57 JST (= UTC 11:57)
+  const base = new Date("2024-01-11T11:57:00.000Z");
+  const synodic = 29.530588;
+  const diffDays = (now.getTime() - base.getTime()) / 86400000;
+  let age = diffDays % synodic;
+  if (age < 0) age += synodic;
+  return age;
+}
+function moonPhaseLabel(age: number): string {
+  if (age < 1.5) return "新月";
+  if (age < 7.4) return "上弦へ";
+  if (age < 8.9) return "上弦";
+  if (age < 14.8) return "満月へ";
+  if (age < 16.2) return "満月";
+  if (age < 22.1) return "下弦へ";
+  if (age < 23.6) return "下弦";
+  return "新月へ";
+}
+function moonEmoji(age: number): string {
+  const syn = 29.530588;
+  const t = age / syn;
+  if (t < 0.125) return "🌑";
+  if (t < 0.25) return "🌒";
+  if (t < 0.375) return "🌓";
+  if (t < 0.5) return "🌔";
+  if (t < 0.625) return "🌕";
+  if (t < 0.75) return "🌖";
+  if (t < 0.875) return "🌗";
+  return "🌘";
+}
+
+// ---- Card image helper ----
+// 画像がある場合：public/cards/rws/<slug>.jpg で表示される（無ければ自動で消えてテキストだけ残る）
+function slugifyCardName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/’/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+function cardImageSrc(name: string): string {
+  return `/cards/rws/${slugifyCardName(name)}.jpg`;
+}
+
 export default function WelcomePage() {
   const router = useRouter();
 
@@ -105,25 +168,27 @@ export default function WelcomePage() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
   const [scope, setScope] = useState<TarotScope | null>(null);
-
   const [profiles, setProfiles] = useState<ClientProfileRow[]>([]);
   const [q, setQ] = useState("");
 
-  // ✅ useSearchParams をやめて window.location から読む
   const [nextPath, setNextPath] = useState<string | null>(null);
 
-  // ✅ 今日のおすすめカード（3枚）
   const [dailyCards, setDailyCards] = useState<string[] | null>(null);
 
-  // ✅ 天気
   const [weather, setWeather] = useState<WeatherView | null>(null);
   const [weatherErr, setWeatherErr] = useState<string | null>(null);
 
-  // 新規登録フォーム
+  const [moonAge, setMoonAge] = useState<number>(() => moonAgeDaysJST(new Date()));
+
   const [newName, setNewName] = useState("");
   const [newRel, setNewRel] = useState("");
   const [newMemo, setNewMemo] = useState("");
   const [creating, setCreating] = useState(false);
+
+  useEffect(() => {
+    const t = setInterval(() => setMoonAge(moonAgeDaysJST(new Date())), 60_000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -132,7 +197,6 @@ export default function WelcomePage() {
       setChecking(true);
       setErr(null);
 
-      // ✅ next をクエリから拾う（CSRでだけ動く）
       try {
         const qs = new URLSearchParams(window.location.search);
         setNextPath(qs.get("next"));
@@ -140,7 +204,6 @@ export default function WelcomePage() {
         setNextPath(null);
       }
 
-      // 1) ログイン確認
       const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
       if (cancelled) return;
 
@@ -159,7 +222,6 @@ export default function WelcomePage() {
       const email = session.user.email ?? null;
       setUserEmail(email);
 
-      // ✅ 今日のおすすめ3枚（ユーザーIDベース）
       try {
         const uid = session.user.id;
         const daily = getDailyCards(uid);
@@ -168,7 +230,6 @@ export default function WelcomePage() {
         setDailyCards(null);
       }
 
-      // 2) allowlist（招待制）チェック
       if (email) {
         const { data: allowedRows, error: allowErr } = await supabase
           .from("allowlist")
@@ -184,11 +245,9 @@ export default function WelcomePage() {
         }
       }
 
-      // 3) scope 読み込み
       const s = loadScope();
       setScope(s);
 
-      // 4) client_profiles 読み込み（RLSでowner_user_idが効く前提）
       const { data: rows, error: profErr } = await supabase
         .from("client_profiles")
         .select(
@@ -210,14 +269,13 @@ export default function WelcomePage() {
     };
   }, [router]);
 
-  // ✅ 天気取得（許可があれば現在地 / ダメなら東京）
+  // 天気（現在地 or 東京）
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       setWeatherErr(null);
       try {
-        // まずは現在地
         const getPos = () =>
           new Promise<GeolocationPosition>((resolve, reject) => {
             if (!navigator.geolocation) return reject(new Error("no geolocation"));
@@ -228,21 +286,18 @@ export default function WelcomePage() {
             });
           });
 
-        let lat = 35.681236; // fallback Tokyo
+        let lat = 35.681236; // Tokyo fallback
         let lon = 139.767125;
 
         try {
           const pos = await getPos();
           lat = pos.coords.latitude;
           lon = pos.coords.longitude;
-        } catch {
-          // fallback Tokyo
-        }
+        } catch {}
 
         const w = await fetchWeather(lat, lon);
         if (cancelled) return;
 
-        // fallback東京だった場合はラベルを変える
         if (Math.abs(lat - 35.681236) < 0.01 && Math.abs(lon - 139.767125) < 0.01) {
           w.locationLabel = "東京";
         }
@@ -360,12 +415,13 @@ export default function WelcomePage() {
     }
   }
 
+  // 黒文字を潰す：importantで白固定
   const primaryBtn = (enabled: boolean) =>
     clsx(
-      "w-full rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm transition",
+      "w-full rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm transition !text-white",
       enabled
-        ? "border-white/15 bg-white/10 text-white hover:bg-white/14"
-        : "cursor-not-allowed border-white/8 bg-white/5 text-white/35"
+        ? "border-white/15 bg-white/10 hover:bg-white/14 !text-white"
+        : "cursor-not-allowed border-white/8 bg-white/5 !text-white/60"
     );
 
   return (
@@ -382,40 +438,49 @@ export default function WelcomePage() {
           }}
         />
         <Stars />
-        <div
-          className="pointer-events-none absolute inset-0 opacity-70"
-          style={{
-            background:
-              "radial-gradient(900px 450px at 30% 55%, rgba(255,255,255,0.05), transparent 60%)," +
-              "radial-gradient(700px 360px at 70% 60%, rgba(255,255,255,0.035), transparent 58%)",
-            filter: "blur(1px)",
-          }}
-        />
 
+        {/* sticky header */}
         <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/55 backdrop-blur-xl">
           <div className="mx-auto max-w-6xl px-4 py-3 md:px-6">
             <div className="flex items-center justify-between gap-3">
-              <Link
-                href="/welcome"
-                className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 transition hover:bg-white/5"
-                aria-label="Tarot Studio（Welcomeへ）"
-              >
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/10 text-xs font-semibold text-white/80">
-                  TS
-                </span>
-                <span
-                  className="text-base font-semibold tracking-tight text-white md:text-lg"
-                  style={{
-                    fontFamily:
-                      'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
-                  }}
+              <div className="flex items-center gap-3">
+                <Link
+                  href="/welcome"
+                  className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 transition hover:bg-white/5"
+                  aria-label="Tarot Studio（Welcomeへ）"
                 >
-                  Tarot Studio
-                </span>
-                <span className="hidden rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-white/80 sm:inline-flex">
-                  招待制 / Invite only
-                </span>
-              </Link>
+                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/10 text-xs font-semibold text-white/80">
+                    TS
+                  </span>
+                  <span
+                    className="text-base font-semibold tracking-tight text-white md:text-lg"
+                    style={{
+                      fontFamily:
+                        'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+                    }}
+                  >
+                    Tarot Studio
+                  </span>
+                  <span className="hidden rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-white/80 sm:inline-flex">
+                    招待制 / Invite only
+                  </span>
+                </Link>
+
+                {/* ✅ 天気：Tarot Studioの横 */}
+                <div className="hidden items-center gap-2 rounded-full border border-white/12 bg-white/8 px-3 py-1 text-xs font-semibold !text-white/85 md:inline-flex">
+                  <span className="text-white/60">天気</span>
+                  {weatherErr ? (
+                    <span className="text-white/55">–</span>
+                  ) : !weather ? (
+                    <span className="text-white/55">取得中…</span>
+                  ) : (
+                    <span className="text-white/85">
+                      {weather.weatherLabel ?? "—"}
+                      {weather.currentTempC != null ? ` / ${Math.round(weather.currentTempC)}℃` : ""}
+                    </span>
+                  )}
+                </div>
+              </div>
 
               <div className="flex items-center gap-2">
                 <span className="hidden text-xs text-white/55 md:inline">
@@ -423,7 +488,7 @@ export default function WelcomePage() {
                 </span>
                 <button
                   onClick={logout}
-                  className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/75 hover:bg-white/12"
+                  className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold !text-white/85 hover:bg-white/12"
                 >
                   ログアウト
                 </button>
@@ -433,8 +498,8 @@ export default function WelcomePage() {
         </div>
 
         <div className="relative mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-12">
-          {/* ✅ ヘッダー：左（タイトル）＋右（今日の3枚＆天気） */}
-          <header className="mb-6 grid gap-4 md:mb-10 md:grid-cols-[1fr_360px] md:items-start md:gap-6">
+          {/* hero: 左タイトル + 右（今日の3枚） */}
+          <header className="mb-6 grid gap-4 md:mb-10 md:grid-cols-[1fr_420px] md:items-start md:gap-6">
             <div>
               <h1
                 className="text-4xl tracking-tight text-white md:text-6xl"
@@ -452,65 +517,52 @@ export default function WelcomePage() {
               </p>
             </div>
 
-            {/* ✅ 赤丸の位置：右上カード */}
+            {/* ✅ 今日の3枚：そのまま（右上） */}
             <div className="rounded-[26px] border border-white/12 bg-white/6 p-4 shadow-[0_30px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
-              <div className="grid gap-3">
-                <div className="rounded-2xl border border-white/10 bg-white/7 p-4">
-                  <div className="text-xs font-semibold tracking-[0.18em] text-white/60">
-                    TODAY CARDS
-                  </div>
-                  <div className="mt-2 text-sm font-semibold text-white/85">今日の3枚</div>
-
-                  {!dailyCards ? (
-                    <div className="mt-2 text-sm text-white/60">（まだありません）</div>
-                  ) : (
-                    <ul className="mt-2 space-y-1 text-sm text-white/80">
-                      <li>1: {dailyCards[0]}</li>
-                      <li>2: {dailyCards[1]}</li>
-                      <li>3: {dailyCards[2]}</li>
-                    </ul>
-                  )}
+              <div className="rounded-2xl border border-white/10 bg-white/7 p-4 text-white">
+                <div className="text-xs font-semibold tracking-[0.18em] text-white/60">
+                  TODAY CARDS
                 </div>
+                <div className="mt-2 text-sm font-semibold text-white/90">今日の3枚</div>
 
-                <div className="rounded-2xl border border-white/10 bg-white/7 p-4">
-                  <div className="text-xs font-semibold tracking-[0.18em] text-white/60">
-                    WEATHER
-                  </div>
-                  <div className="mt-2 flex items-center justify-between gap-2">
-                    <div className="text-sm font-semibold text-white/85">天気</div>
-                    <div className="text-xs text-white/55">{weather?.locationLabel ?? "…"}</div>
-                  </div>
-
-                  {weatherErr ? (
-                    <div className="mt-2 text-sm text-white/60">（取得できませんでした）</div>
-                  ) : !weather ? (
-                    <div className="mt-2 text-sm text-white/60">取得中…</div>
-                  ) : (
-                    <div className="mt-2 grid gap-1 text-sm text-white/80">
-                      <div>
-                        {weather.weatherLabel ?? "天気"}{" "}
-                        {weather.currentTempC != null ? ` / ${Math.round(weather.currentTempC)}℃` : ""}
-                      </div>
-                      <div className="text-xs text-white/60">
-                        今日：{weather.todayMaxC != null ? `${Math.round(weather.todayMaxC)}℃` : "–"} /{" "}
-                        {weather.todayMinC != null ? `${Math.round(weather.todayMinC)}℃` : "–"}
-                      </div>
-                      <div className="text-[11px] text-white/45">
-                        ※位置情報OFFの場合は東京で表示
-                      </div>
+                {!dailyCards ? (
+                  <div className="mt-2 text-sm text-white/60">（まだありません）</div>
+                ) : (
+                  <>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      {dailyCards.slice(0, 3).map((name, i) => (
+                        <div key={i} className="rounded-xl border border-white/10 bg-black/20 p-1">
+                          <img
+                            src={cardImageSrc(name)}
+                            alt={name}
+                            className="h-[98px] w-full rounded-lg object-cover"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).style.display = "none";
+                            }}
+                          />
+                          <div className="mt-1 text-[11px] leading-4 text-white/75">
+                            {i + 1}: {name}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  )}
-                </div>
+                    <div className="mt-2 text-[11px] text-white/45">
+                      ※画像は /public/cards/rws/ に配置すると表示されます
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </header>
 
+          {/* エラー */}
           {err ? (
             <div className="mb-4 rounded-2xl border border-rose-300/20 bg-rose-500/10 px-5 py-4 text-sm text-rose-100">
               {err}
             </div>
           ) : null}
 
+          {/* メイン */}
           <section className="rounded-[30px] border border-white/12 bg-white/6 p-3 shadow-[0_40px_120px_rgba(0,0,0,0.55)] backdrop-blur-2xl sm:p-4 md:p-6">
             <div className="grid gap-4 md:grid-cols-2 md:gap-6">
               {/* 左：スコープ選択 */}
@@ -528,7 +580,7 @@ export default function WelcomePage() {
 
                   <button
                     onClick={resetScope}
-                    className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/70 hover:bg-white/12"
+                    className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold !text-white/85 hover:bg-white/12"
                     type="button"
                   >
                     選択を消す
@@ -540,7 +592,6 @@ export default function WelcomePage() {
                     自分をみる（セルフ鑑定）
                   </button>
 
-                  {/* ✅ ここ：自分を見るの下にカルテ編集ボタン */}
                   <Link href="/maintain" className={primaryBtn(true)}>
                     カルテ編集（Maintain）
                   </Link>
@@ -556,7 +607,7 @@ export default function WelcomePage() {
                         value={q}
                         onChange={(e) => setQ(e.target.value)}
                         placeholder="検索（名前 / 関係 / メモ）"
-                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white shadow-sm outline-none placeholder:text-white/35 focus:border-white/20"
+                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm !text-white shadow-sm outline-none placeholder:!text-white/35 focus:border-white/20"
                       />
                     </div>
 
@@ -578,7 +629,7 @@ export default function WelcomePage() {
                                   type="button"
                                   onClick={() => chooseClient(p)}
                                   className={clsx(
-                                    "w-full rounded-2xl border px-4 py-3 text-left transition",
+                                    "w-full rounded-2xl border px-4 py-3 text-left transition !text-white",
                                     active
                                       ? "border-white/18 bg-white/12"
                                       : "border-white/10 bg-white/6 hover:bg-white/10"
@@ -605,7 +656,6 @@ export default function WelcomePage() {
                       )}
                     </div>
 
-                    {/* 新規登録 */}
                     <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
                       <div className="text-sm font-semibold text-white/85">新規登録（カルテ）</div>
 
@@ -614,20 +664,20 @@ export default function WelcomePage() {
                           value={newName}
                           onChange={(e) => setNewName(e.target.value)}
                           placeholder="表示名（例：Aさん）"
-                          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white shadow-sm outline-none placeholder:text-white/35 focus:border-white/20"
+                          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm !text-white shadow-sm outline-none placeholder:!text-white/35 focus:border-white/20"
                         />
                         <input
                           value={newRel}
                           onChange={(e) => setNewRel(e.target.value)}
                           placeholder="関係（任意：恋人/家族/同僚など）"
-                          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white shadow-sm outline-none placeholder:text-white/35 focus:border-white/20"
+                          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm !text-white shadow-sm outline-none placeholder:!text-white/35 focus:border-white/20"
                         />
                         <textarea
                           value={newMemo}
                           onChange={(e) => setNewMemo(e.target.value)}
                           rows={3}
                           placeholder="事情メモ（任意：あとから追記して育てる）"
-                          className="w-full resize-none rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white shadow-sm outline-none placeholder:text-white/35 focus:border-white/20"
+                          className="w-full resize-none rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm !text-white shadow-sm outline-none placeholder:!text-white/35 focus:border-white/20"
                         />
 
                         <button
@@ -735,6 +785,18 @@ export default function WelcomePage() {
 
           <div className="h-10" />
         </div>
+
+        {/* ✅ 月齢：右下固定 */}
+        <div className="fixed bottom-4 right-4 z-40 w-[220px] rounded-2xl border border-white/12 bg-white/6 p-4 text-white shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
+          <div className="text-xs font-semibold tracking-[0.18em] text-white/60">MOON</div>
+          <div className="mt-2 flex items-center justify-between">
+            <div className="text-sm font-semibold text-white/90">月齢</div>
+            <div className="text-xs text-white/60">
+              {moonEmoji(moonAge)} {moonPhaseLabel(moonAge)}
+            </div>
+          </div>
+          <div className="mt-2 text-sm text-white/85">月齢 {moonAge.toFixed(1)} 日</div>
+        </div>
       </div>
     </main>
   );
@@ -754,36 +816,7 @@ function Stars() {
           "radial-gradient(circle at 88% 58%, rgba(255,255,255,0.14) 0 1px, transparent 2px)," +
           "radial-gradient(circle at 24% 78%, rgba(255,255,255,0.14) 0 1px, transparent 2px)," +
           "radial-gradient(circle at 54% 82%, rgba(255,255,255,0.12) 0 1px, transparent 2px)," +
-          "radial-gradient(circle at 82% 86%, rgba(255,255,255,0.12) 0 1px, transparent 2px)," +
-          "radial-gradient(circle at 18% 32%, rgba(255,255,255,0.22) 0 1.5px, transparent 3px)," +
-          "radial-gradient(circle at 70% 48%, rgba(255,255,255,0.18) 0 1.5px, transparent 3px)," +
-          "radial-gradient(circle at 40% 64%, rgba(255,255,255,0.16) 0 1.5px, transparent 3px)," +
-          "radial-gradient(circle at 64% 28%, rgba(255,255,255,0.18) 0 2px, transparent 4px)",
-        filter: "blur(0.2px)",
-      }}
-    />
-  );
-}  
-
-function Stars() {
-  return (
-    <div
-      className="pointer-events-none absolute inset-0 opacity-70"
-      style={{
-        backgroundImage:
-          "radial-gradient(circle at 12% 18%, rgba(255,255,255,0.22) 0 1px, transparent 2px)," +
-          "radial-gradient(circle at 28% 46%, rgba(255,255,255,0.18) 0 1px, transparent 2px)," +
-          "radial-gradient(circle at 44% 22%, rgba(255,255,255,0.16) 0 1px, transparent 2px)," +
-          "radial-gradient(circle at 62% 18%, rgba(255,255,255,0.20) 0 1px, transparent 2px)," +
-          "radial-gradient(circle at 78% 32%, rgba(255,255,255,0.15) 0 1px, transparent 2px)," +
-          "radial-gradient(circle at 88% 58%, rgba(255,255,255,0.14) 0 1px, transparent 2px)," +
-          "radial-gradient(circle at 24% 78%, rgba(255,255,255,0.14) 0 1px, transparent 2px)," +
-          "radial-gradient(circle at 54% 82%, rgba(255,255,255,0.12) 0 1px, transparent 2px)," +
-          "radial-gradient(circle at 82% 86%, rgba(255,255,255,0.12) 0 1px, transparent 2px)," +
-          "radial-gradient(circle at 18% 32%, rgba(255,255,255,0.22) 0 1.5px, transparent 3px)," +
-          "radial-gradient(circle at 70% 48%, rgba(255,255,255,0.18) 0 1.5px, transparent 3px)," +
-          "radial-gradient(circle at 40% 64%, rgba(255,255,255,0.16) 0 1.5px, transparent 3px)," +
-          "radial-gradient(circle at 64% 28%, rgba(255,255,255,0.18) 0 2px, transparent 4px)",
+          "radial-gradient(circle at 82% 86%, rgba(255,255,255,0.12) 0 1px, transparent 2px)",
         filter: "blur(0.2px)",
       }}
     />
