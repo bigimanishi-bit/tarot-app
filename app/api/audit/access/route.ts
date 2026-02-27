@@ -19,19 +19,26 @@ function todayJstDateString() {
   return jst.toISOString().slice(0, 10);
 }
 
-function pickIp(req: Request) {
-  const xff = req.headers.get("x-forwarded-for") || "";
+function parseIps(req: Request) {
+  const xff = (req.headers.get("x-forwarded-for") || "").trim();
+
   const first = xff.split(",")[0]?.trim();
-  if (first) return first;
+  const ip_client = first ? first : null;
 
   const xri = req.headers.get("x-real-ip")?.trim();
-  if (xri) return xri;
+  const ip_proxy = xri ? xri : null;
 
-  return "";
+  return {
+    xff: xff || null,
+    ip_client,
+    ip_proxy,
+  };
 }
 
 function isUuid(v: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(v);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    v
+  );
 }
 
 let cityReader: Reader<CityResponse> | null = null;
@@ -75,10 +82,17 @@ export async function POST(req: Request) {
 
     const ua = req.headers.get("user-agent") || null;
 
+    // 追加: IPを分解して保存（切り分け用）
+    const { xff, ip_client, ip_proxy } = parseIps(req);
+
+    // 互換維持: 既存の ip 列は「できるだけユーザー本人のIP」に寄せる
+    const bodyIp =
+      typeof body?.ip === "string" ? body.ip.trim() : "";
     const ip =
-  (typeof body?.ip === "string" ? body.ip.trim() : "") ||
-  pickIp(req) ||
-  "unknown";
+      bodyIp ||
+      ip_client ||
+      ip_proxy ||
+      "unknown";
 
     // device_id が壊れてても止めない（uuid必須のDBなので生成して入れる）
     const safeDeviceId = isUuid(device_id)
@@ -109,10 +123,15 @@ export async function POST(req: Request) {
 
     const sb = makeSupabaseServerClient();
     if (!sb) {
-      return NextResponse.json({ ok: true, skipped: true, reason: "missing supabase env" });
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        reason: "missing supabase env",
+      });
     }
 
-    const finalDeviceId = safeDeviceId || "00000000-0000-0000-0000-000000000000";
+    const finalDeviceId =
+      safeDeviceId || "00000000-0000-0000-0000-000000000000";
 
     const { error } = await sb.from("access_audit_logs").insert({
       created_day,
@@ -125,13 +144,22 @@ export async function POST(req: Request) {
       city,
       postal,
       timezone,
+
+      // 追加: 切り分け用の3点セット
+      xff,
+      ip_client,
+      ip_proxy,
     });
 
     if (error) {
       if (error.code === "23505" || String(error.message).includes("duplicate")) {
         return NextResponse.json({ ok: true, dedup: true });
       }
-      return NextResponse.json({ ok: true, inserted: false, db_error: error.message });
+      return NextResponse.json({
+        ok: true,
+        inserted: false,
+        db_error: error.message,
+      });
     }
 
     return NextResponse.json({ ok: true, inserted: true });
