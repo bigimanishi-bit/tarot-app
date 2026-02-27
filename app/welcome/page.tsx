@@ -3,6 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import AuditGeoFull from "@/app/welcome/AuditGeoFull";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { getOrCreateDailyCards as getDailyCards } from "@/lib/dailyCards";
