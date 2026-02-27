@@ -22,7 +22,6 @@ function getCookie(name: string) {
 }
 
 function setCookie(name: string, value: string) {
-  // 1年、全パス、SameSite=Lax
   const maxAge = 60 * 60 * 24 * 365;
   document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(
     value
@@ -30,7 +29,6 @@ function setCookie(name: string, value: string) {
 }
 
 function ensureDeviceIdCookie() {
-  // middlewareで付く想定だけど「初回だけ読めない/付かない」ケースを潰す
   let deviceId = getCookie("ts_device_id");
   if (deviceId) return deviceId;
 
@@ -46,7 +44,12 @@ async function bindDeviceAfterLogin(): Promise<{ ok: boolean; error?: string }> 
     const device_id = ensureDeviceIdCookie();
     if (!device_id) return { ok: false, error: "device_id が取得できません" };
 
-    // OTP直後に user が取れない瞬間があるので、1回待ってから取る
+    // middleware が入れた geo cookie（あれば）
+    const vercel_country = getCookie("ts_geo_country");
+    const vercel_region = getCookie("ts_geo_region");
+    const vercel_city = getCookie("ts_geo_city");
+
+    // OTP直後に user が取れない瞬間対策
     await new Promise((r) => setTimeout(r, 0));
 
     const { data } = await supabase.auth.getUser();
@@ -60,6 +63,11 @@ async function bindDeviceAfterLogin(): Promise<{ ok: boolean; error?: string }> 
         user_id: user.id,
         email: user.email ?? null,
         device_id,
+
+        // ★追加：user_devices にも位置を残す
+        vercel_country: vercel_country ?? null,
+        vercel_region: vercel_region ?? null,
+        vercel_city: vercel_city ?? null,
       }),
     });
 
@@ -120,7 +128,6 @@ export default function LoginPage() {
       return;
     }
 
-    // ここで一応 device_id を確保しておく（初回の取りこぼし対策）
     ensureDeviceIdCookie();
 
     setMessage("メールを送信しました。届いたコードを入力してください。");
@@ -146,11 +153,9 @@ export default function LoginPage() {
       return;
     }
 
-    // 端末固定（失敗してもログインは続行）
     const bind = await bindDeviceAfterLogin();
     if (!bind.ok) {
       setMessage("ログインは成功。端末固定に失敗: " + (bind.error ?? "unknown"));
-      // それでも進める
     } else {
       setMessage("ログインしました。Welcomeへ移動します…");
     }
