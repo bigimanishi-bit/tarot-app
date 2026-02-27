@@ -15,24 +15,45 @@ function clsx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
 }
 
-// ★追加：cookieから ts_device_id を読む
 function getCookie(name: string) {
   if (typeof document === "undefined") return null;
   const m = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
   return m ? decodeURIComponent(m[2]) : null;
 }
 
-// ★追加：ログイン成功後に user_id/email × device_id を固定
-async function bindDeviceAfterLogin() {
+function setCookie(name: string, value: string) {
+  // 1年、全パス、SameSite=Lax
+  const maxAge = 60 * 60 * 24 * 365;
+  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(
+    value
+  )}; Path=/; Max-Age=${maxAge}; SameSite=Lax; Secure`;
+}
+
+function ensureDeviceIdCookie() {
+  // middlewareで付く想定だけど「初回だけ読めない/付かない」ケースを潰す
+  let deviceId = getCookie("ts_device_id");
+  if (deviceId) return deviceId;
+
+  const uuid = (globalThis.crypto?.randomUUID && globalThis.crypto.randomUUID()) || "";
+  if (!uuid) return null;
+
+  setCookie("ts_device_id", uuid);
+  return uuid;
+}
+
+async function bindDeviceAfterLogin(): Promise<{ ok: boolean; error?: string }> {
   try {
+    const device_id = ensureDeviceIdCookie();
+    if (!device_id) return { ok: false, error: "device_id が取得できません" };
+
+    // OTP直後に user が取れない瞬間があるので、1回待ってから取る
+    await new Promise((r) => setTimeout(r, 0));
+
     const { data } = await supabase.auth.getUser();
     const user = data?.user;
-    if (!user?.id) return;
+    if (!user?.id) return { ok: false, error: "user_id が取得できません" };
 
-    const device_id = getCookie("ts_device_id");
-    if (!device_id) return;
-
-    await fetch("/api/audit/bind-device", {
+    const res = await fetch("/api/audit/bind-device", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -41,8 +62,15 @@ async function bindDeviceAfterLogin() {
         device_id,
       }),
     });
-  } catch {
-    // noop
+
+    const j = await res.json().catch(() => ({} as any));
+    if (!res.ok || j?.ok === false) {
+      return { ok: false, error: j?.error || `bind-device failed (${res.status})` };
+    }
+
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, error: e?.message ?? "bind-device error" };
   }
 }
 
@@ -55,7 +83,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  // ✅ ログイン済みなら login に留まらず welcome へ
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -93,6 +120,9 @@ export default function LoginPage() {
       return;
     }
 
+    // ここで一応 device_id を確保しておく（初回の取りこぼし対策）
+    ensureDeviceIdCookie();
+
     setMessage("メールを送信しました。届いたコードを入力してください。");
     setStep("code");
     setLoading(false);
@@ -116,11 +146,17 @@ export default function LoginPage() {
       return;
     }
 
-    // ★追加：ログイン成立したら “固定” を先に実行（失敗してもログインは続行）
-    await bindDeviceAfterLogin();
+    // 端末固定（失敗してもログインは続行）
+    const bind = await bindDeviceAfterLogin();
+    if (!bind.ok) {
+      setMessage("ログインは成功。端末固定に失敗: " + (bind.error ?? "unknown"));
+      // それでも進める
+    } else {
+      setMessage("ログインしました。Welcomeへ移動します…");
+    }
 
-    setMessage("ログインしました。Welcomeへ移動します…");
     router.replace("/welcome");
+    setLoading(false);
   };
 
   const handleBack = () => {
@@ -132,9 +168,7 @@ export default function LoginPage() {
 
   return (
     <main className="min-h-screen">
-      {/* 背景（夜空・高級感） */}
       <div className="relative min-h-screen overflow-hidden bg-[#0B1020]">
-        {/* 深いグラデ */}
         <div
           className="pointer-events-none absolute inset-0"
           style={{
@@ -146,10 +180,8 @@ export default function LoginPage() {
           }}
         />
 
-        {/* 星（点だけ） */}
         <Stars />
 
-        {/* うっすら霧 */}
         <div
           className="pointer-events-none absolute inset-0 opacity-70"
           style={{
@@ -160,7 +192,6 @@ export default function LoginPage() {
           }}
         />
 
-        {/* ✅ スクロールしても残るヘッダー（PC/モバイル共通） */}
         <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/55 backdrop-blur-xl">
           <div className="mx-auto max-w-6xl px-4 py-3 md:px-6">
             <div className="flex items-center justify-between gap-3">
@@ -189,7 +220,6 @@ export default function LoginPage() {
                 </span>
               </div>
 
-              {/* 右側：最小情報だけ（モバイルでも邪魔しない） */}
               <div className="text-xs text-white/55">
                 {step === "code" ? "コード入力" : ""}
               </div>
@@ -198,7 +228,6 @@ export default function LoginPage() {
         </div>
 
         <div className="relative mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-12">
-          {/* 上部キャッチ（モバイル最適化） */}
           <header className="mb-6 md:mb-10">
             <h1
               className="text-4xl tracking-tight text-white md:text-6xl"
@@ -216,11 +245,8 @@ export default function LoginPage() {
             </p>
           </header>
 
-          {/* メイン（ガラス） */}
           <section className="rounded-[30px] border border-white/12 bg-white/6 p-3 shadow-[0_40px_120px_rgba(0,0,0,0.55)] backdrop-blur-2xl sm:p-4 md:p-6">
-            {/* ✅ モバイルは1カラム、md以上で2カラム */}
             <div className="grid gap-4 md:grid-cols-2 md:gap-6">
-              {/* 左：世界観 */}
               <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm md:p-6">
                 <div className="mb-5 flex items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
@@ -259,7 +285,6 @@ export default function LoginPage() {
                 </div>
               </div>
 
-              {/* 右：ログイン */}
               <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm md:p-6">
                 <div className="mb-5">
                   <h3 className="text-2xl font-semibold text-white">入室</h3>
