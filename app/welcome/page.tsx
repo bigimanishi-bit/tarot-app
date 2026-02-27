@@ -26,8 +26,6 @@ type ClientProfileRow = {
   last_reading_at: string | null;
 };
 
-type ChatScopeLabel = string;
-
 type WeatherView = {
   locationLabel: string;
   currentTempC: number | null;
@@ -38,15 +36,6 @@ type WeatherView = {
 
 function clsx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
-}
-
-function safeJsonParse<T>(v: string | null): T | null {
-  if (!v) return null;
-  try {
-    return JSON.parse(v) as T;
-  } catch {
-    return null;
-  }
 }
 
 function weatherCodeLabel(code: number | null | undefined): string | null {
@@ -158,6 +147,20 @@ function slugifyCardName(name: string): string {
 }
 function cardImageSrc(name: string): string {
   return `/cards/rws/${slugifyCardName(name)}.jpg`;
+}
+
+// ---- Mini fortune (simple, fast) ----
+function dailyMiniFortune(names: string[]): string {
+  const key = (names?.[0] ?? "").toLowerCase();
+
+  if (key.includes("five of cups"))
+    return "今日は「失ったもの」に気持ちが引っ張られやすい日。残ってるものを一つ拾うと流れが戻る。";
+  if (key.includes("three of swords"))
+    return "今日は心がチクッとしやすい日。無理に元気を作らず、距離を取って休憩が吉。";
+  if (key.includes("king of cups"))
+    return "今日は落ち着きが武器。感情を抱え込みすぎず、静かに整えるほど強い。";
+
+  return "今日は「気持ちの整理」と「ペース調整」がテーマ。焦らず、一つずつ。";
 }
 
 export default function WelcomePage() {
@@ -466,7 +469,7 @@ export default function WelcomePage() {
                   </span>
                 </Link>
 
-                {/* ✅ 天気：Tarot Studioの横 */}
+                {/* 天気：ヘッダー内 */}
                 <div className="hidden items-center gap-2 rounded-full border border-white/12 bg-white/8 px-3 py-1 text-xs font-semibold !text-white/85 md:inline-flex">
                   <span className="text-white/60">天気</span>
                   {weatherErr ? (
@@ -498,67 +501,108 @@ export default function WelcomePage() {
         </div>
 
         <div className="relative mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-12">
-          {/* hero: 左タイトル + 右（今日の3枚） */}
-          <header className="mb-6 grid gap-4 md:mb-10 md:grid-cols-[1fr_420px] md:items-start md:gap-6">
-            <div>
-              <h1
-                className="text-4xl tracking-tight text-white md:text-6xl"
-                style={{
-                  fontFamily:
-                    'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
-                  textShadow: "0 10px 40px rgba(0,0,0,0.55)",
-                }}
-              >
-                Welcome
-              </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-7 text-white/75 md:text-base">
-                ここでだけ、鑑定の“入れ物”を選びます。<br className="hidden md:block" />
-                以降のページは自動で同じ入れ物を使い、混ざりません（プライバシー保護）。
-              </p>
-            </div>
+          {/* HERO：カード主役（中央） */}
+          <header className="mb-6 md:mb-10">
+            <div className="mx-auto max-w-[760px]">
+              {/* 上：小さめ見出し（Welcomeを縮小） */}
+              <div className="mb-4 text-center">
+                <h1
+                  className="text-2xl tracking-tight text-white md:text-3xl"
+                  style={{
+                    fontFamily:
+                      'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+                    textShadow: "0 10px 40px rgba(0,0,0,0.55)",
+                  }}
+                >
+                  Welcome
+                </h1>
+                <p className="mt-2 text-sm leading-7 text-white/70">
+                  ここでだけ、鑑定の“入れ物”を選びます。以降のページは同じ入れ物を使い、混ざりません。
+                </p>
+              </div>
 
-            {/* ✅             {/* ✅ 今日の3枚：小さめ + 全体表示（トリミング無し） */}
-            <div className="rounded-[22px] border border-white/12 bg-white/6 p-3 shadow-[0_30px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
-              <div className="rounded-2xl border border-white/10 bg-white/7 p-3 text-white">
-                <div className="text-[11px] font-semibold tracking-[0.18em] text-white/60">
-                  TODAY CARDS
-                </div>
-                <div className="mt-1 text-sm font-semibold text-white/90">今日の3枚</div>
+              {/* 中央：今日の3枚（主役） */}
+              <div className="rounded-[30px] border border-white/12 bg-white/6 p-4 shadow-[0_40px_140px_rgba(0,0,0,0.60)] backdrop-blur-2xl">
+                <div className="rounded-[26px] border border-white/10 bg-white/7 p-4">
+                  <div className="flex items-end justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-semibold tracking-[0.18em] text-white/60">
+                        TODAY CARDS
+                      </div>
+                      <div className="mt-1 text-base font-semibold text-white/90">今日の3枚</div>
+                    </div>
 
-                {!dailyCards ? (
-                  <div className="mt-2 text-sm text-white/60">（まだありません）</div>
-                ) : (
-                  <>
-                    <div className="mt-3 grid grid-cols-3 gap-2">
-                      {dailyCards.slice(0, 3).map((name, i) => (
-                        <div
-                          key={i}
-                          className="rounded-xl border border-white/10 bg-black/20 p-2"
+                    {/* 右上：MOON（主役じゃないので軽く） */}
+                    <div className="hidden items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/75 md:flex">
+                      <span className="text-white/55">MOON</span>
+                      <span className="text-white/80">
+                        {moonEmoji(moonAge)} {moonPhaseLabel(moonAge)} / {moonAge.toFixed(1)}日
+                      </span>
+                    </div>
+                  </div>
+
+                  {!dailyCards ? (
+                    <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm text-white/65">
+                      （まだありません）
+                    </div>
+                  ) : (
+                    <>
+                      {/* カード：1.5倍。全体表示（contain） */}
+                      <div className="mt-4 grid grid-cols-3 gap-3">
+                        {dailyCards.slice(0, 3).map((name, i) => (
+                          <div
+                            key={i}
+                            className="rounded-2xl border border-white/10 bg-black/20 p-3"
+                          >
+                            <div className="flex items-center justify-center rounded-xl border border-white/10 bg-white/5 py-3">
+                              <img
+                                src={cardImageSrc(name)}
+                                alt={name}
+                                className="h-[132px] w-[96px] object-contain"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                                }}
+                              />
+                            </div>
+
+                            <div className="mt-2 text-xs text-white/75">
+                              {i + 1}: {name}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* ミニ鑑定（簡単な占い） */}
+                      <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-6 text-white/80">
+                        {dailyMiniFortune(dailyCards)}
+                      </div>
+
+                      {/* 今日を読む */}
+                      <div className="mt-3">
+                        <Link
+                          href="/new"
+                          className={primaryBtn(ready)}
+                          aria-disabled={!ready}
+                          onClick={(e) => {
+                            if (!ready) e.preventDefault();
+                          }}
                         >
-                          {/* カード枠：小さく固定。画像はcontainで全体表示 */}
-                          <div className="flex items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white/5">
-                            <img
-                              src={cardImageSrc(name)}
-                              alt={name}
-                              className="h-[68px] w-[50px] object-contain"
-                              onError={(e) => {
-                                (e.currentTarget as HTMLImageElement).style.display = "none";
-                              }}
-                            />
-                          </div>
+                          今日を読む
+                        </Link>
 
-                          <div className="mt-1 text-[10px] leading-4 text-white/75">
-                            {i + 1}: {name}
+                        {!ready ? (
+                          <div className="mt-2 text-xs text-white/50">
+                            ※「自分」か「カルテ」を選ぶと押せます
                           </div>
-                        </div>
-                      ))}
-                    </div>
+                        ) : null}
+                      </div>
 
-                    <div className="mt-2 text-[10px] text-white/45">
-                      ※画像は /public/cards/rws/ に配置すると表示されます
-                    </div>
-                  </>
-                )}
+                      <div className="mt-3 text-[11px] text-white/45">
+                        ※画像は /public/cards/rws/ に配置すると表示されます
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
           </header>
@@ -794,8 +838,8 @@ export default function WelcomePage() {
           <div className="h-10" />
         </div>
 
-        {/* ✅ 月齢：右下固定 */}
-        <div className="fixed bottom-4 right-4 z-40 w-[220px] rounded-2xl border border-white/12 bg-white/6 p-4 text-white shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
+        {/* 月齢：右下固定（保険として残す：モバイルではここが見やすい） */}
+        <div className="fixed bottom-4 right-4 z-40 w-[220px] rounded-2xl border border-white/12 bg-white/6 p-4 text-white shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-2xl md:hidden">
           <div className="text-xs font-semibold tracking-[0.18em] text-white/60">MOON</div>
           <div className="mt-2 flex items-center justify-between">
             <div className="text-sm font-semibold text-white/90">月齢</div>
