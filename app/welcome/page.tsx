@@ -3,10 +3,10 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import AuditGeoFull from "./AuditGeoFull";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { getOrCreateDailyCards as getDailyCards } from "@/lib/dailyCards";
+import AuditGeoFull from "./AuditGeoFull"; // ✅ これを使う
 import {
   loadScope,
   saveScope,
@@ -37,33 +37,6 @@ type WeatherView = {
 
 function clsx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
-}
-
-function getCookie(name: string) {
-  if (typeof document === "undefined") return null;
-  const m = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
-  return m ? decodeURIComponent(m[2]) : null;
-}
-
-function setCookie(name: string, value: string) {
-  const maxAge = 60 * 60 * 24 * 365;
-  document.cookie = `${encodeURIComponent(name)}=${encodeURIComponent(
-    value
-  )}; Path=/; Max-Age=${maxAge}; SameSite=Lax; Secure`;
-}
-
-function ensureDeviceIdCookie() {
-  let deviceId = getCookie("ts_device_id");
-  if (deviceId) return deviceId;
-  const uuid = (globalThis.crypto?.randomUUID && globalThis.crypto.randomUUID()) || "";
-  if (!uuid) return null;
-  setCookie("ts_device_id", uuid);
-  return uuid;
-}
-
-function todayJst() {
-  const jst = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  return jst.toISOString().slice(0, 10);
 }
 
 function weatherCodeLabel(code: number | null | undefined): string | null {
@@ -133,6 +106,7 @@ async function fetchWeather(lat: number, lon: number): Promise<WeatherView> {
 
 // ---- Moon age (simple) ----
 function moonAgeDaysJST(now = new Date()): number {
+  // 2024-01-11 20:57 JST (= UTC 11:57)
   const base = new Date("2024-01-11T11:57:00.000Z");
   const synodic = 29.530588;
   const diffDays = (now.getTime() - base.getTime()) / 86400000;
@@ -198,6 +172,8 @@ export default function WelcomePage() {
   const [checking, setChecking] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  // ✅ 追加：AuditGeoFullに渡すための userId
   const [userId, setUserId] = useState<string | null>(null);
 
   const [scope, setScope] = useState<TarotScope | null>(null);
@@ -222,102 +198,6 @@ export default function WelcomePage() {
     const t = setInterval(() => setMoonAge(moonAgeDaysJST(new Date())), 60_000);
     return () => clearInterval(t);
   }, []);
-
-  // ★追加：Welcomeで毎回 “端末固定” を実行（これで user_devices が空にならない）
-  async function bindDeviceOnWelcome(uid: string, email: string | null) {
-    try {
-      const device_id = ensureDeviceIdCookie();
-      if (!device_id) return;
-
-      const vercel_country = getCookie("ts_geo_country");
-      const vercel_region = getCookie("ts_geo_region");
-      const vercel_city = getCookie("ts_geo_city");
-
-      const res = await fetch("/api/audit/bind-device", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          user_id: uid,
-          email,
-          device_id,
-          vercel_country: vercel_country ?? null,
-          vercel_region: vercel_region ?? null,
-          vercel_city: vercel_city ?? null,
-        }),
-      });
-
-      const j = await res.json().catch(() => ({} as any));
-      if (!res.ok || j?.ok === false) {
-        // 監査だけ失敗してもアプリは使えるようにする
-        setErr((prev) => prev ?? `監査(端末固定)失敗: ${j?.error || res.status}`);
-      }
-    } catch {
-      setErr((prev) => prev ?? "監査(端末固定)失敗");
-    }
-  }
-
-  // ★追加：GPSを日次で保存（1日1回）
-  async function saveGeoDaily(uid: string) {
-    const device_id = ensureDeviceIdCookie();
-    if (!device_id) return;
-
-    const day = todayJst();
-    const key = `ts_geo_sent_${day}_${uid}_${device_id}`;
-    if (typeof window !== "undefined" && localStorage.getItem(key) === "1") return;
-
-    const vercel_country = getCookie("ts_geo_country");
-    const vercel_region = getCookie("ts_geo_region");
-    const vercel_city = getCookie("ts_geo_city");
-
-    // GPS取得（拒否でもOK：vercel情報だけ送る）
-    let lat: number | null = null;
-    let lng: number | null = null;
-    let accuracy_m: number | null = null;
-
-    try {
-      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-        if (!navigator.geolocation) return reject(new Error("no geolocation"));
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: false,
-          timeout: 6000,
-          maximumAge: 10 * 60 * 1000,
-        });
-      });
-      lat = pos.coords.latitude;
-      lng = pos.coords.longitude;
-      accuracy_m = pos.coords.accuracy;
-    } catch {
-      // noop（拒否・タイムアウトでも監査としてはOK）
-    }
-
-    try {
-      const res = await fetch("/api/audit/geo", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          created_day: day,
-          user_id: uid,
-          device_id,
-          lat,
-          lng,
-          accuracy_m,
-          vercel_country: vercel_country ?? null,
-          vercel_region: vercel_region ?? null,
-          vercel_city: vercel_city ?? null,
-        }),
-      });
-
-      const j = await res.json().catch(() => ({} as any));
-      if (!res.ok || j?.ok === false) {
-        setErr((prev) => prev ?? `監査(GPS)失敗: ${j?.error || res.status}`);
-        return;
-      }
-
-      localStorage.setItem(key, "1");
-    } catch {
-      setErr((prev) => prev ?? "監査(GPS)失敗");
-    }
-  }
 
   useEffect(() => {
     let cancelled = false;
@@ -348,15 +228,14 @@ export default function WelcomePage() {
         return;
       }
 
-      const uid = session.user.id;
+      // ✅ 追加：ここで userId を確実にセット
+      setUserId(session.user.id);
+
       const email = session.user.email ?? null;
-      setUserId(uid);
       setUserEmail(email);
 
-      // ★ここで毎回端末固定（welcomeに寄せて安定化）
-      await bindDeviceOnWelcome(uid, email);
-
       try {
+        const uid = session.user.id;
         const daily = getDailyCards(uid);
         setDailyCards(daily.cards);
       } catch {
@@ -395,9 +274,6 @@ export default function WelcomePage() {
       }
 
       setChecking(false);
-
-      // ★GPS日次保存（ここで実行）
-      await saveGeoDaily(uid);
     })();
 
     return () => {
@@ -422,7 +298,7 @@ export default function WelcomePage() {
             });
           });
 
-        let lat = 35.681236;
+        let lat = 35.681236; // Tokyo fallback
         let lon = 139.767125;
 
         try {
@@ -586,6 +462,9 @@ export default function WelcomePage() {
 
   return (
     <main className="min-h-screen">
+      {/* ✅ 追加：これが無かったのが原因。Welcomeに実際に置く */}
+      <AuditGeoFull userId={userId} />
+
       <div className="relative min-h-screen overflow-hidden bg-[#0B1020]">
         <div
           className="pointer-events-none absolute inset-0"
@@ -599,6 +478,7 @@ export default function WelcomePage() {
         />
         <Stars />
 
+        {/* sticky header */}
         <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/55 backdrop-blur-xl">
           <div className="mx-auto max-w-6xl px-4 py-3 md:px-6">
             <div className="flex items-center justify-between gap-3">
@@ -642,8 +522,10 @@ export default function WelcomePage() {
         </div>
 
         <div className="relative mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-12">
+          {/* HERO：カード主役（中央） */}
           <header className="mb-6 md:mb-10">
             <div className="mx-auto max-w-[760px]">
+              {/* 見出し（小さめ） */}
               <div className="mb-4 text-center">
                 <h1
                   className="text-2xl tracking-tight text-white md:text-3xl"
@@ -660,6 +542,7 @@ export default function WelcomePage() {
                 </p>
               </div>
 
+              {/* 中央：今日の3枚（主役）＋天気を同枠へ */}
               <div className="rounded-[30px] border border-white/12 bg-white/6 p-4 shadow-[0_40px_140px_rgba(0,0,0,0.60)] backdrop-blur-2xl">
                 <div className="rounded-[26px] border border-white/10 bg-white/7 p-4">
                   <div className="flex items-end justify-between gap-3">
@@ -671,6 +554,7 @@ export default function WelcomePage() {
                     </div>
                   </div>
 
+                  {/* ✅ 天気＆月齢：同じ枠の中 */}
                   <div className="mt-3">
                     <WeatherChip />
                   </div>
@@ -681,6 +565,7 @@ export default function WelcomePage() {
                     </div>
                   ) : (
                     <>
+                      {/* カード：大きめ＆全体表示（contain） */}
                       <div className="mt-4 grid grid-cols-3 gap-3">
                         {dailyCards.slice(0, 3).map((name, i) => (
                           <div
@@ -704,6 +589,7 @@ export default function WelcomePage() {
                         ))}
                       </div>
 
+                      {/* ✅ 簡単な占い一文 */}
                       <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-6 text-white/80">
                         {dailyMiniFortune(dailyCards)}
                       </div>
@@ -718,15 +604,12 @@ export default function WelcomePage() {
             </div>
           </header>
 
+          {/* エラー */}
           {err ? (
             <div className="mb-4 rounded-2xl border border-rose-300/20 bg-rose-500/10 px-5 py-4 text-sm text-rose-100">
               {err}
             </div>
           ) : null}
-
-          {/* 以降のUIはあなたの元コードのまま（省略なしで維持） */}
-          {/* …（ここから下は、あなたが貼ってくれたUI部分が続きます） */}
-          {/* 省略したいけど、一括置換のためここに全部入ってます */}
 
           {/* メイン */}
           <section className="rounded-[30px] border border-white/12 bg-white/6 p-3 shadow-[0_40px_120px_rgba(0,0,0,0.55)] backdrop-blur-2xl sm:p-4 md:p-6">
