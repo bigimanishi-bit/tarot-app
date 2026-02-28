@@ -151,19 +151,58 @@ function cardImageSrc(name: string): string {
 
 // ---- Mini fortune (simple, fast) ----
 function dailyMiniFortune(names: string[]): string {
-  const a = (names?.[0] ?? "").toLowerCase();
-  const b = (names?.[1] ?? "").toLowerCase();
-  const c = (names?.[2] ?? "").toLowerCase();
-  const s = `${a} ${b} ${c}`;
+  const cards = (names ?? []).slice(0, 3).map((x) => (x ?? "").toLowerCase());
 
-  if (s.includes("three of swords"))
-    return "今日は心がチクッとしやすい。無理に元気を作らず、距離を取って整えるほど回復が早い。";
-  if (s.includes("five of cups"))
-    return "今日は「失ったもの」に意識が引っ張られやすい。残ってるものを一つ拾うと流れが戻る。";
-  if (s.includes("king of cups"))
-    return "今日は落ち着きが武器。感情を抱え込みすぎず、静かに整えるほど強い。";
+  // ざっくりテーマ辞書（必要なら増やせる）
+  const MAJOR_THEME: Array<[RegExp, string]> = [
+    [/the tower|tower/, "予定変更や衝撃に備える日。崩れる前に整えるのが吉。"],
+    [/death/, "切り替えの日。終わらせて、次に移すほど軽くなる。"],
+    [/the star|star/, "回復と希望。焦らず、良い方に寄せていける。"],
+    [/the moon|moon/, "不安が膨らみやすい日。事実と想像を分けると落ち着く。"],
+    [/the sun|sun/, "明るさが戻る日。小さくても前に進める。"],
+    [/judgement|judgment/, "再スタート。過去のやり直しより、今の選択を。"],
+    [/the world|world/, "一区切り。仕上げ・完了に強い流れ。"],
+    [/wheel of fortune|wheel/, "流れが動く日。固執せず、波に合わせると良い。"],
+    [/the lovers|lovers/, "選択と向き合う日。曖昧を減らすほど楽になる。"],
+    [/the hermit|hermit/, "内省の日。静かな時間が回復になる。"],
+    [/temperance/, "バランス調整。急がず整えるほどうまくいく。"],
+  ];
 
-  return "今日は「気持ちの整理」と「ペース調整」がテーマ。焦らず、一つずつ。";
+  const SUIT_THEME: Array<[RegExp, string]> = [
+    [/swords/, "言葉と考えがテーマ。結論を急がず、整理してから。"],
+    [/cups/, "気持ちがテーマ。無理に強くならず、やさしく整える。"],
+    [/wands/, "勢いがテーマ。小さく着火して、動き出すと伸びる。"],
+    [/pentacles/, "現実とお金がテーマ。足元を固めるほど安心する。"],
+  ];
+
+  // まず大アルカナ優先で当てる
+  for (const c of cards) {
+    for (const [re, msg] of MAJOR_THEME) {
+      if (re.test(c)) return msg;
+    }
+  }
+
+  // 次にスートの雰囲気
+  let hits = 0;
+  const suitCount = { swords: 0, cups: 0, wands: 0, pentacles: 0 };
+  for (const c of cards) {
+    if (c.includes("swords")) (suitCount.swords++, hits++);
+    else if (c.includes("cups")) (suitCount.cups++, hits++);
+    else if (c.includes("wands")) (suitCount.wands++, hits++);
+    else if (c.includes("pentacles")) (suitCount.pentacles++, hits++);
+  }
+
+  const topSuit = (Object.keys(suitCount) as Array<keyof typeof suitCount>).sort(
+    (a, b) => suitCount[b] - suitCount[a]
+  )[0];
+
+  const suitRe = new RegExp(topSuit);
+  for (const [re, msg] of SUIT_THEME) {
+    if (re.source === suitRe.source) return msg;
+  }
+
+  // 最後の保険
+  return "今日は「整える」がテーマ。焦らず、一つずつ。";
 }
 
 export default function WelcomePage() {
