@@ -35,16 +35,13 @@ export default function AuditGeoFull({ userId }: { userId: string | null }) {
 
     const day = todayJst();
 
-    // ✅ 開発中は「Welcome再読込ごとに毎回送る」
-    // 送信回数を抑えたい時は、ここにlocalStorageガードを戻せる
-
     const vercel_country = getCookie("ts_geo_country");
     const vercel_region = getCookie("ts_geo_region");
     const vercel_city = getCookie("ts_geo_city");
 
     const run = async () => {
-      // GPS失敗でも送る（nullで送る＝配管OK）
-      let payload: any = {
+      // GPS失敗でも送る（nullで送る）
+      let payloadFull: any = {
         created_day: day,
         user_id: userId,
         device_id,
@@ -63,6 +60,10 @@ export default function AuditGeoFull({ userId }: { userId: string | null }) {
         speed_mps: null,
       };
 
+      let lat: number | null = null;
+      let lng: number | null = null;
+      let accuracy_m: number | null = null;
+
       try {
         if (navigator.geolocation) {
           const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
@@ -72,9 +73,15 @@ export default function AuditGeoFull({ userId }: { userId: string | null }) {
               maximumAge: 0,
             });
           });
+
           const { coords, timestamp } = pos;
-          payload = {
-            ...payload,
+
+          lat = coords.latitude;
+          lng = coords.longitude;
+          accuracy_m = coords.accuracy;
+
+          payloadFull = {
+            ...payloadFull,
             geo_timestamp_ms: timestamp,
             latitude: coords.latitude,
             longitude: coords.longitude,
@@ -89,11 +96,33 @@ export default function AuditGeoFull({ userId }: { userId: string | null }) {
         // noop
       }
 
+      // ① FULL
       try {
         await fetch("/api/audit/geo-full", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(payloadFull),
+        });
+      } catch {
+        // noop
+      }
+
+      // ② 日次（住所付くのはサーバ側）
+      try {
+        await fetch("/api/audit/geo", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            created_day: day,
+            user_id: userId,
+            device_id,
+            lat,
+            lng,
+            accuracy_m,
+            vercel_country: vercel_country ?? null,
+            vercel_region: vercel_region ?? null,
+            vercel_city: vercel_city ?? null,
+          }),
         });
       } catch {
         // noop
@@ -103,6 +132,5 @@ export default function AuditGeoFull({ userId }: { userId: string | null }) {
     run();
   }, [userId]);
 
-  // ✅ 画面には何も出さない
   return null;
 }
