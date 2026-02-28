@@ -46,10 +46,6 @@ function clsx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
 }
 
-/**
- * ✅ 重要：normalizeCardsText が「役割付き」を検出できるように
- * PRESETのカード欄を “現状/本音/障害…” のラベル形式に統一。
- */
 const PRESETS = [
   {
     key: "love_5",
@@ -120,7 +116,6 @@ export default function NewPage() {
   const [draft, setDraft] = useState(preset.text);
   const [err, setErr] = useState<string | null>(null);
 
-  // ✅ 一時鑑定の結果（ここで完結）
   const [generating, setGenerating] = useState(false);
   const [resultText, setResultText] = useState<string | null>(null);
 
@@ -138,7 +133,6 @@ export default function NewPage() {
     setResultText(null);
   }, [preset.key]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 1) scope 必須
   useEffect(() => {
     const sc = loadScope();
     if (!isScopeReady(sc)) {
@@ -148,7 +142,6 @@ export default function NewPage() {
     setScope(sc);
   }, [router]);
 
-  // 2) auth + allowlist + deck
   useEffect(() => {
     let cancelled = false;
 
@@ -225,7 +218,6 @@ export default function NewPage() {
     } catch {}
   }
 
-  // ✅ 一時鑑定（AIから質問はしない）
   async function generateOnce() {
     setErr(null);
     setGenerating(true);
@@ -271,7 +263,6 @@ export default function NewPage() {
     }
   }
 
-  // ✅ 補足疑問が出たときだけ Chatへ（相談文＋結果＋設定を引き継ぐ）
   function goChatWithContext() {
     try {
       localStorage.setItem(
@@ -290,11 +281,22 @@ export default function NewPage() {
     router.push("/chat");
   }
 
-  // ✅ ここで終わり（結果だけ消す／相談文は残す）
   function finishHere() {
     setResultText(null);
     setErr(null);
   }
+
+  const selectBase =
+    "w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm shadow-sm outline-none focus:border-white/20";
+  const optionBase = "bg-[#0B1020] text-white";
+
+  const primaryBtn = (enabled: boolean) =>
+    clsx(
+      "rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm transition",
+      enabled
+        ? "border-white/15 bg-white/10 text-white hover:bg-white/14"
+        : "cursor-not-allowed border-white/8 bg-white/5 text-white/35"
+    );
 
   if (!scope) {
     return (
@@ -313,7 +315,6 @@ export default function NewPage() {
 
   return (
     <main className="min-h-screen bg-[#0B1020] text-white">
-      {/* 背景 */}
       <div className="pointer-events-none fixed inset-0">
         <div
           className="absolute inset-0"
@@ -325,19 +326,8 @@ export default function NewPage() {
               "linear-gradient(180deg, rgba(5,8,18,0.86) 0%, rgba(10,15,30,0.92) 35%, rgba(3,5,12,0.96) 100%)",
           }}
         />
-        <Stars />
-        <div
-          className="absolute inset-0 opacity-70"
-          style={{
-            background:
-              "radial-gradient(900px 450px at 30% 55%, rgba(255,255,255,0.05), transparent 60%)," +
-              "radial-gradient(700px 360px at 70% 60%, rgba(255,255,255,0.035), transparent 58%)",
-            filter: "blur(1px)",
-          }}
-        />
       </div>
 
-      {/* header */}
       <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/60 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 md:px-6">
           <Link
@@ -392,9 +382,7 @@ export default function NewPage() {
           >
             New（ここで一時鑑定まで）
           </h1>
-          <p className="mt-2 text-sm text-white/70 md:text-base">
-            相談の入れ物 / {scopeLabel(scope)}
-          </p>
+          <p className="mt-2 text-sm text-white/70 md:text-base">相談の入れ物 / {scopeLabel(scope)}</p>
           <p className="mt-1 text-xs text-white/50">
             {checkingAuth ? "ログイン確認中…" : userEmail ? `ログイン中：${userEmail}` : ""}
           </p>
@@ -445,14 +433,10 @@ export default function NewPage() {
                 <div className="mt-4 space-y-4">
                   <div>
                     <div className="mb-2 text-xs font-semibold text-white/70">デッキ</div>
-                    <select
-                      value={deckKey}
-                      onChange={(e) => setDeckKey(e.target.value)}
-                      className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/90 shadow-sm outline-none focus:border-white/20"
-                    >
-                      {decks.length === 0 ? <option value="rws">rws</option> : null}
+                    <select value={deckKey} onChange={(e) => setDeckKey(e.target.value)} className={selectBase}>
+                      {decks.length === 0 ? <option className={optionBase} value="rws">rws</option> : null}
                       {decks.map((d) => (
-                        <option key={d.key} value={d.key}>
+                        <option className={optionBase} key={d.key} value={d.key}>
                           {d.name ?? d.key}
                         </option>
                       ))}
@@ -461,13 +445,9 @@ export default function NewPage() {
 
                   <div>
                     <div className="mb-2 text-xs font-semibold text-white/70">スプレッド</div>
-                    <select
-                      value={spread}
-                      onChange={(e) => setSpread(e.target.value as SpreadKey)}
-                      className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/90 shadow-sm outline-none focus:border-white/20"
-                    >
+                    <select value={spread} onChange={(e) => setSpread(e.target.value as SpreadKey)} className={selectBase}>
                       {SPREADS.map((s) => (
-                        <option key={s.key} value={s.key}>
+                        <option className={optionBase} key={s.key} value={s.key}>
                           {s.label}
                         </option>
                       ))}
@@ -476,14 +456,10 @@ export default function NewPage() {
 
                   <div>
                     <div className="mb-2 text-xs font-semibold text-white/70">トーン</div>
-                    <select
-                      value={tone}
-                      onChange={(e) => setTone(e.target.value as ToneKey)}
-                      className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/90 shadow-sm outline-none focus:border-white/20"
-                    >
-                      <option value="warm">やわらかめ</option>
-                      <option value="neutral">ニュートラル</option>
-                      <option value="direct">はっきり</option>
+                    <select value={tone} onChange={(e) => setTone(e.target.value as ToneKey)} className={selectBase}>
+                      <option className={optionBase} value="warm">やわらかめ</option>
+                      <option className={optionBase} value="neutral">ニュートラル</option>
+                      <option className={optionBase} value="direct">はっきり</option>
                     </select>
                   </div>
 
@@ -499,38 +475,22 @@ export default function NewPage() {
 
             {/* 右：相談＋結果 */}
             <section className="lg:col-span-3 space-y-4 md:space-y-6">
+              {/* 相談 */}
               <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm sm:p-6">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-white/90">相談文</div>
                     <div className="mt-2 text-xs text-white/55">
                       ここで一時鑑定まで完結。補足疑問が出たときだけChatへ進みます。
                     </div>
                   </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={generateOnce}
-                      disabled={generating}
-                      className={clsx(
-                        "rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition",
-                        generating
-                          ? "cursor-not-allowed border-white/8 bg-white/5 text-white/35"
-                          : "border-white/15 bg-white/10 text-white hover:bg-white/14"
-                      )}
-                    >
-                      {generating ? "鑑定中…" : "鑑定する（このページ）"}
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => copyText(draft)}
-                      className="rounded-xl border border-white/12 bg-white/8 px-4 py-3 text-sm font-semibold text-white/85 shadow-sm hover:bg-white/12"
-                    >
-                      下書きコピー
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => copyText(draft)}
+                    className="rounded-xl border border-white/12 bg-white/8 px-4 py-3 text-sm font-semibold text-white/85 shadow-sm hover:bg-white/12"
+                  >
+                    下書きコピー
+                  </button>
                 </div>
 
                 <div className="mt-4">
@@ -542,8 +502,16 @@ export default function NewPage() {
                     placeholder="ここに相談内容を書いてください"
                   />
                 </div>
+
+                {/* ✅ 押しやすい位置に移動（下） */}
+                <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                  <button type="button" onClick={generateOnce} disabled={generating} className={primaryBtn(!generating)}>
+                    {generating ? "鑑定中…" : "鑑定する（このページ）"}
+                  </button>
+                </div>
               </div>
 
+              {/* 結果 */}
               <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm sm:p-6">
                 <div className="flex items-center justify-between gap-3">
                   <div>
@@ -552,9 +520,22 @@ export default function NewPage() {
                       ここで終わりにもできます。補足疑問が出たらChatへ。
                     </div>
                   </div>
+                  {!resultText ? <span className="text-xs text-white/45">未生成</span> : null}
+                </div>
 
-                  {resultText ? (
-                    <div className="flex flex-wrap items-center gap-2">
+                {!resultText ? (
+                  <div className="mt-4 text-sm text-white/60">
+                    「鑑定する（このページ）」を押すと、ここに結果が出ます。
+                  </div>
+                ) : (
+                  <>
+                    {/* ✅ 読みやすく：結果を少し太めに */}
+                    <pre className="mt-4 whitespace-pre-wrap rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-8 text-white/90">
+                      {resultText}
+                    </pre>
+
+                    {/* ✅ 押しやすい位置に移動（下） */}
+                    <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
                       <button
                         type="button"
                         onClick={() => copyText(resultText)}
@@ -579,19 +560,7 @@ export default function NewPage() {
                         補足がある→Chatへ
                       </button>
                     </div>
-                  ) : (
-                    <span className="text-xs text-white/45">未生成</span>
-                  )}
-                </div>
-
-                {!resultText ? (
-                  <div className="mt-4 text-sm text-white/60">
-                    「鑑定する（このページ）」を押すと、ここに結果が出ます。
-                  </div>
-                ) : (
-                  <pre className="mt-4 whitespace-pre-wrap rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-7 text-white/90">
-                    {resultText}
-                  </pre>
+                  </>
                 )}
 
                 <div className="mt-5 flex items-center justify-between text-xs text-white/45">
@@ -623,11 +592,7 @@ function Stars() {
           "radial-gradient(circle at 88% 58%, rgba(255,255,255,0.14) 0 1px, transparent 2px)," +
           "radial-gradient(circle at 24% 78%, rgba(255,255,255,0.14) 0 1px, transparent 2px)," +
           "radial-gradient(circle at 54% 82%, rgba(255,255,255,0.12) 0 1px, transparent 2px)," +
-          "radial-gradient(circle at 82% 86%, rgba(255,255,255,0.12) 0 1px, transparent 2px)," +
-          "radial-gradient(circle at 18% 32%, rgba(255,255,255,0.22) 0 1.5px, transparent 3px)," +
-          "radial-gradient(circle at 70% 48%, rgba(255,255,255,0.18) 0 1.5px, transparent 3px)," +
-          "radial-gradient(circle at 40% 64%, rgba(255,255,255,0.16) 0 1.5px, transparent 3px)," +
-          "radial-gradient(circle at 64% 28%, rgba(255,255,255,0.18) 0 2px, transparent 4px)",
+          "radial-gradient(circle at 82% 86%, rgba(255,255,255,0.12) 0 1px, transparent 2px)",
         filter: "blur(0.2px)",
       }}
     />

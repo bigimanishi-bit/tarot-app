@@ -1,3 +1,4 @@
+// src/lib/readingGenerator.ts
 import OpenAI from "openai";
 import { getPromptByName } from "@/lib/promptStore";
 
@@ -26,7 +27,18 @@ const MAJOR_MAP: Record<string, string> = {
   "21": "世界",
 };
 
-// 数字トークン → 大アルカナ名へ（内部用）
+type ToneKey = "warm" | "neutral" | "direct";
+
+type GenerateInput = {
+  theme: string;
+  title?: string;
+  mode: "normal" | "dictionary";
+  cards_text: string;
+  deck_key?: string;
+  spread_key?: string;
+  tone?: ToneKey | string;
+};
+
 function tokenToCardLabel(t: string) {
   const s = t.trim();
   const m = s.match(/^([0-9]{1,2})$/);
@@ -34,20 +46,16 @@ function tokenToCardLabel(t: string) {
   return s;
 }
 
-// 役割付き or トークン列を正規化
 function normalizeCardsText(raw: string) {
   const s = (raw ?? "").trim();
-  if (!s) {
-    return { spread: "3cards_default", normalized: "現状：\n課題：\n助言：" };
-  }
+  if (!s) return { spread: "3cards_default", normalized: "現状：\n課題：\n助言：" };
 
   const hasRole =
-    /現状\s*[:：]|課題\s*[:：]|助言\s*[:：]|相手\s*[:：]|本音\s*[:：]|障害\s*[:：]|打開\s*[:：]|近未来\s*[:：]|着地\s*[:：]/.test(
+    /現状\s*[:：]|課題\s*[:：]|助言\s*[:：]|相手\s*[:：]|本音\s*[:：]|障害\s*[:：]|打開\s*[:：]|近未来\s*[:：]|着地\s*[:：]|カード\s*[:：]|状況\s*[:：]/.test(
       s
     );
 
   if (hasRole) {
-    // 役割付きの場合も、数字だけなら内部変換して渡す
     const normalized = s.replace(/(^|\s)([0-9]{1,2})(?=\s|$)/g, (all, p1, num) => {
       const name = MAJOR_MAP[num];
       return name ? `${p1}${name}` : all;
@@ -63,28 +71,23 @@ function normalizeCardsText(raw: string) {
     .filter(Boolean)
     .map(tokenToCardLabel);
 
-  if (tokens.length === 3) {
-    return {
-      spread: "3cards_default",
-      normalized: `現状：${tokens[0]}\n課題：${tokens[1]}\n助言：${tokens[2]}`,
-    };
-  }
-  if (tokens.length === 5) {
+  if (tokens.length === 1) return { spread: "1card_default", normalized: `カード：${tokens[0]}` };
+  if (tokens.length === 3)
+    return { spread: "3cards_default", normalized: `現状：${tokens[0]}\n課題：${tokens[1]}\n助言：${tokens[2]}` };
+  if (tokens.length === 5)
     return {
       spread: "5cards_default",
       normalized: `現状：${tokens[0]}\n相手（または環境）：${tokens[1]}\n本音：${tokens[2]}\n障害：${tokens[3]}\n打開：${tokens[4]}`,
     };
-  }
-  if (tokens.length === 7) {
+  if (tokens.length === 7)
     return {
       spread: "7cards_default",
       normalized: `現状：${tokens[0]}\n相手（または環境）：${tokens[1]}\n本音：${tokens[2]}\n障害：${tokens[3]}\n打開：${tokens[4]}\n近未来：${tokens[5]}\n着地：${tokens[6]}`,
     };
-  }
+
   return { spread: "list", normalized: `並び：${tokens.join(" / ")}` };
 }
 
-// 「努力」の力など、単語内部は壊さないための境界付き置換
 function stripCardNamesSafely(text: string) {
   if (!text) return text;
 
@@ -93,14 +96,12 @@ function stripCardNamesSafely(text: string) {
     "吊るされた男","死神","節制","悪魔","塔","星","月","太陽","審判","世界"
   ];
 
-  // 前後が “日本語文字” じゃないときだけ置換（単語内は除外）
   const boundary = (w: string) =>
     new RegExp(`(?<![一-龠ぁ-んァ-ン])${w}(?![一-龠ぁ-んァ-ン])`, "g");
 
   let out = text;
   for (const w of majors) out = out.replace(boundary(w), "（伏せ）");
 
-  // 小アルカナ表記も（単語内は起きにくいけど一応）
   out = out.replace(
     /(?<![一-龠ぁ-んァ-ン])([0-9０-９一二三四五六七八九十]+)\s*(ワンド|ソード|カップ|ペンタクル)(?![一-龠ぁ-んァ-ン])/g,
     "（伏せ）"
@@ -109,19 +110,18 @@ function stripCardNamesSafely(text: string) {
   return out;
 }
 
-type ToneKey = "warm" | "neutral" | "direct";
+function toneHint(tone?: ToneKey | string) {
+  if (tone === "warm") return "口調はやわらかく、短文で安心感を優先。";
+  if (tone === "neutral") return "口調は落ち着いて整理。";
+  if (tone === "direct")
+    return "口調ははっきり。短文中心。『かもしれません』連発は禁止（最大2回）。";
+  return "口調は自然で落ち着いて。";
+}
 
-type GenerateInput = {
-  theme: string;
-  title?: string;
-  mode: "normal" | "dictionary";
-  cards_text: string;
-
-  // ✅ 任意（/new から渡す）
-  deck_key?: string;
-  spread_key?: string;
-  tone?: ToneKey | string;
-};
+function needsSilenceScenarios(inputText: string) {
+  const s = inputText ?? "";
+  return /(既読|未読|返信|返事|反応|留守電|電話|連絡|音沙汰)/.test(s);
+}
 
 export async function generateReadingText(input: GenerateInput) {
   const master = await getPromptByName("rws_master");
@@ -131,52 +131,56 @@ export async function generateReadingText(input: GenerateInput) {
 
   const client = new OpenAI({ apiKey });
   const parsed = normalizeCardsText(input.cards_text);
+  const wantScenarios = needsSilenceScenarios(parsed.normalized);
 
-  const toneHint =
-    input.tone === "warm"
-      ? "文体はやわらかく、余韻を残す。断定を避ける。"
-      : input.tone === "neutral"
-      ? "文体は落ち着いて整理する。断定は避け、可能性で述べる。"
-      : input.tone === "direct"
-      ? "文体ははっきり。余計な前置きは省く。ただし攻撃的にはしない。"
-      : "文体は落ち着いて、占い師として自然に。";
+  const normalHint = [
+    "あなたは通常鑑定モード。",
+    "本文でカード名を一切出さない（カード名ゼロ）。番号列も出さない。",
+    "入力にある具体（既読/留守電など）を必ず使う。一般論で埋めない。",
+    "テンプレ語（心の整理/自己理解/見つめ直す）は禁止。具体語に言い換える。",
+    "見出し語・ラベルは禁止（例：事実/解釈/見通し/焦点/状況の整理 等）。",
+    "同じ意味の言い換えで水増ししない。",
+    "",
+    "出力ルール（固定）",
+    "冒頭は必ず3行。各1文。ラベルなし。箇条書き記号なし。",
+    "1行目=今起きていること（具体）",
+    "2行目=不安の焦点（何が分からなくて苦しいか）",
+    "3行目=当面の見立て（どうなりやすいか）",
+    "※3行は短く。各行25〜40字程度。",
+    "",
+    "その後は3段落：",
+    "段落A=状況の見立て（2〜4文）",
+    "段落B=相手/環境（断定しない、2〜4文）",
+    "段落C=あなた側で一番削れているポイント（2〜4文）",
+    "",
+    wantScenarios
+      ? "反応がない系の相談は、段落Bの中で相手側の可能性を3つ挙げる。『忙しい』の一言で逃げない（例：返すと話が進むのが怖い／読めない状態にして自分を守る／周囲や手続き都合で反応できない）。最後に主仮説を1つだけ述べる（断定はしないが逃げない）。"
+      : "",
+    "最後は1行で締める：いま心が一番削れている一点を具体に言う（提案はしない）。",
+    "全体は300〜520字。",
+    toneHint(input.tone),
+  ]
+    .filter(Boolean)
+    .join("\n");
 
-  const modeHint =
-    input.mode === "dictionary"
-      ? [
-          "あなたは📚辞書モード。",
-          "カード名の使用OK。",
-          "カードごとに「核／出やすい現れ方／注意」。",
-          "最後に2〜3行だけ鑑定（まとめ＋一手＋確度）。",
-          "長さは800〜1200字を目安（長すぎ禁止）。",
-        ].join("\n")
-      : [
-          "あなたは通常鑑定モード。",
-          "本文でカード名を一切出さない（カード名ゼロ）。",
-          "番号列を使わない。",
-          "見出し横の括弧（）を使わない。",
-          "説教や一般論に逃げず、占いとして「流れ・山場・分岐・鍵」を語る。",
-          "長さは550〜850字を目安（長すぎ禁止）。",
-          "構成は必ず次の順で出す：",
-          "1) いまの流れ（2〜3文）",
-          "2) 山場（何が引っ掛かっているか）",
-          "3) 分岐（こう動くとこうなる、の二股）",
-          "4) 鍵（今ここだけ押さえる一点）",
-          "5) 一手（名詞＋動詞で1行、低侵襲）",
-          "6) 確度（高/中/低 を1行）",
-          "質問で返さない（追加質問禁止）。",
-          toneHint,
-        ].join("\n");
+  const dictHint = [
+    "あなたは📚辞書モード。",
+    "カード名の使用OK。",
+    "カードごとに『核／出やすい現れ方／注意』を短く。",
+    "最後に2〜3行だけ、今回の状況に当てはめたまとめ。",
+    "600〜1100字目安。",
+    toneHint(input.tone),
+  ].join("\n");
+
+  const modeHint = input.mode === "dictionary" ? dictHint : normalHint;
 
   const userText = [
     `テーマ: ${input.theme}`,
     input.title ? `タイトル: ${input.title}` : "",
-    input.deck_key ? `デッキ: ${input.deck_key}` : "",
-    input.spread_key ? `スプレッドKey: ${input.spread_key}` : "",
     input.tone ? `トーン: ${String(input.tone)}` : "",
     `モード: ${input.mode}`,
     `スプレッド: ${parsed.spread}`,
-    `カード:`,
+    `カード/入力:`,
     parsed.normalized,
   ]
     .filter(Boolean)
@@ -189,16 +193,14 @@ export async function generateReadingText(input: GenerateInput) {
       { role: "system", content: modeHint },
       { role: "user", content: userText },
     ],
-    temperature: 0.7,
-    max_tokens: input.mode === "dictionary" ? 900 : 700,
+    temperature: input.mode === "dictionary" ? 0.65 : 0.5,
+    max_tokens: input.mode === "dictionary" ? 950 : 420,
   });
 
   let text = res.choices?.[0]?.message?.content?.trim() ?? "";
   if (!text) throw new Error("empty generation");
 
-  if (input.mode === "normal") {
-    text = stripCardNamesSafely(text);
-  }
+  if (input.mode === "normal") text = stripCardNamesSafely(text);
 
   return { text, prompt_updated_at: master.updated_at };
 }
