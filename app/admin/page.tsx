@@ -1,3 +1,4 @@
+// app/admin/page.tsx
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -13,6 +14,28 @@ function clsx(...xs: Array<string | false | null | undefined>) {
 async function getToken() {
   const { data } = await supabase.auth.getSession();
   return data.session?.access_token ?? null;
+}
+
+function pickLatLng(row: any): { lat: number; lng: number } | null {
+  // geo-full
+  const lat1 = typeof row?.latitude === "number" ? row.latitude : Number(row?.latitude);
+  const lng1 = typeof row?.longitude === "number" ? row.longitude : Number(row?.longitude);
+  if (Number.isFinite(lat1) && Number.isFinite(lng1) && lat1 !== 0 && lng1 !== 0) {
+    return { lat: lat1, lng: lng1 };
+  }
+
+  // geo-daily
+  const lat2 = typeof row?.lat_round === "number" ? row.lat_round : Number(row?.lat_round);
+  const lng2 = typeof row?.lng_round === "number" ? row.lng_round : Number(row?.lng_round);
+  if (Number.isFinite(lat2) && Number.isFinite(lng2) && lat2 !== 0 && lng2 !== 0) {
+    return { lat: lat2, lng: lng2 };
+  }
+
+  return null;
+}
+
+function mapsUrl(lat: number, lng: number) {
+  return `https://www.google.com/maps?q=${encodeURIComponent(lat)},${encodeURIComponent(lng)}`;
 }
 
 export default function AdminPage() {
@@ -76,6 +99,11 @@ export default function AdminPage() {
     return Object.keys(first);
   }, [rows]);
 
+  const showMapCol = useMemo(() => {
+    // どれか1件でも座標が取れるならMap列を出す
+    return rows.some((r) => !!pickLatLng(r));
+  }, [rows]);
+
   return (
     <main className="min-h-screen bg-[#0B1020] text-white">
       <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/70 backdrop-blur-xl">
@@ -102,10 +130,18 @@ export default function AdminPage() {
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            <TabBtn active={tab === "geo"} onClick={() => setTab("geo")}>GPS(日次)</TabBtn>
-            <TabBtn active={tab === "geo_full"} onClick={() => setTab("geo_full")}>GPS(全部)</TabBtn>
-            <TabBtn active={tab === "devices"} onClick={() => setTab("devices")}>端末固定</TabBtn>
-            <TabBtn active={tab === "access"} onClick={() => setTab("access")}>アクセス</TabBtn>
+            <TabBtn active={tab === "geo"} onClick={() => setTab("geo")}>
+              GPS(日次)
+            </TabBtn>
+            <TabBtn active={tab === "geo_full"} onClick={() => setTab("geo_full")}>
+              GPS(全部)
+            </TabBtn>
+            <TabBtn active={tab === "devices"} onClick={() => setTab("devices")}>
+              端末固定
+            </TabBtn>
+            <TabBtn active={tab === "access"} onClick={() => setTab("access")}>
+              アクセス
+            </TabBtn>
 
             <div className="ml-auto flex flex-wrap items-center gap-2">
               <input
@@ -116,9 +152,7 @@ export default function AdminPage() {
               />
               <input
                 value={limit}
-                onChange={(e) =>
-                  setLimit(Math.max(1, Math.min(200, Number(e.target.value) || 50)))
-                }
+                onChange={(e) => setLimit(Math.max(1, Math.min(200, Number(e.target.value) || 50)))}
                 className="w-20 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs outline-none"
                 inputMode="numeric"
               />
@@ -150,6 +184,11 @@ export default function AdminPage() {
             <table className="min-w-[900px] w-full text-xs">
               <thead className="text-white/70">
                 <tr>
+                  {showMapCol ? (
+                    <th className="border-b border-white/10 px-2 py-2 text-left whitespace-nowrap">
+                      map
+                    </th>
+                  ) : null}
                   {cols.map((c) => (
                     <th
                       key={c}
@@ -161,22 +200,42 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r, i) => (
-                  <tr key={i} className="odd:bg-white/[0.03]">
-                    {cols.map((c) => (
-                      <td key={c} className="border-b border-white/10 px-2 py-2 whitespace-nowrap">
-                        {typeof r[c] === "object" ? JSON.stringify(r[c]) : String(r[c] ?? "")}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
+                {rows.map((r, i) => {
+                  const ll = pickLatLng(r);
+                  return (
+                    <tr key={i} className="odd:bg-white/[0.03]">
+                      {showMapCol ? (
+                        <td className="border-b border-white/10 px-2 py-2 whitespace-nowrap">
+                          {ll ? (
+                            <a
+                              href={mapsUrl(ll.lat, ll.lng)}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center rounded-lg border border-white/12 bg-white/8 px-2 py-1 text-[11px] font-semibold hover:bg-white/12"
+                            >
+                              📍Map
+                            </a>
+                          ) : (
+                            <span className="text-white/35">—</span>
+                          )}
+                        </td>
+                      ) : null}
+
+                      {cols.map((c) => (
+                        <td key={c} className="border-b border-white/10 px-2 py-2 whitespace-nowrap">
+                          {typeof r[c] === "object" ? JSON.stringify(r[c]) : String(r[c] ?? "")}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
         </div>
 
         <div className="mt-3 text-[11px] text-white/45">
-          ※ 404 が出る場合、admin_allowlist にメールが登録されていない（または無効）です。
+          ※ GPS(日次)は丸め座標、GPS(全部)は生座標。Mapは座標がある行だけ表示。
         </div>
       </div>
     </main>
