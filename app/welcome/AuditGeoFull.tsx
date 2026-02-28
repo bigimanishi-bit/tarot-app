@@ -1,7 +1,7 @@
 // app/welcome/AuditGeoFull.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 
 function getCookie(name: string) {
   const m = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
@@ -27,42 +27,28 @@ function todayJst() {
 }
 
 export default function AuditGeoFull({ userId }: { userId: string | null }) {
-  const [dbg, setDbg] = useState<any>(null);
-
   useEffect(() => {
-    const qs = new URLSearchParams(window.location.search);
-    const debug = qs.get("debug_geo") === "1";
-    const force = qs.get("force_geo") === "1";
-
-    if (!userId) {
-      if (debug) setDbg({ ok: false, reason: "userId is null (not logged in or not set)" });
-      return;
-    }
+    if (!userId) return;
 
     const device_id = ensureDeviceIdCookie();
-    if (!device_id) {
-      if (debug) setDbg({ ok: false, reason: "device_id missing" });
-      return;
-    }
+    if (!device_id) return;
 
     const day = todayJst();
-    const isProd = process.env.NODE_ENV === "production";
-    const key = `ts_geo_full_sent_${day}_${userId}_${device_id}`;
-    if (isProd && !force && localStorage.getItem(key) === "1") {
-      if (debug) setDbg({ ok: true, skipped: true, reason: "daily guard", key });
-      return;
-    }
+
+    // ✅ 開発中は「Welcome再読込ごとに毎回送る」
+    // 送信回数を抑えたい時は、ここにlocalStorageガードを戻せる
 
     const vercel_country = getCookie("ts_geo_country");
     const vercel_region = getCookie("ts_geo_region");
     const vercel_city = getCookie("ts_geo_city");
 
     const run = async () => {
-      // GPS失敗でも送る（nullで送ってDBが増えるかで配管確認）
+      // GPS失敗でも送る（nullで送る＝配管OK）
       let payload: any = {
         created_day: day,
         user_id: userId,
         device_id,
+
         vercel_country: vercel_country ?? null,
         vercel_region: vercel_region ?? null,
         vercel_city: vercel_city ?? null,
@@ -99,80 +85,24 @@ export default function AuditGeoFull({ userId }: { userId: string | null }) {
             speed_mps: coords.speed,
           };
         }
-      } catch (e: any) {
-        if (debug) payload._gps_error = e?.message ?? String(e);
+      } catch {
+        // noop
       }
 
       try {
-        const res = await fetch("/api/audit/geo-full", {
+        await fetch("/api/audit/geo-full", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify(payload),
         });
-        const j = await res.json().catch(() => ({} as any));
-
-        if (debug) {
-          setDbg({
-            at: new Date().toISOString(),
-            status: res.status,
-            ok: res.ok,
-            body: j,
-            sent: {
-              user_id: payload.user_id,
-              device_id: payload.device_id,
-              day: payload.created_day,
-              lat: payload.latitude,
-              lng: payload.longitude,
-              gps_error: payload._gps_error ?? null,
-            },
-          });
-        }
-
-        if (!res.ok || j?.ok === false) return;
-        if (isProd) localStorage.setItem(key, "1");
-      } catch (e: any) {
-        if (debug) {
-          setDbg({
-            at: new Date().toISOString(),
-            status: "fetch_error",
-            ok: false,
-            body: { error: e?.message ?? String(e) },
-          });
-        }
+      } catch {
+        // noop
       }
     };
 
     run();
   }, [userId]);
 
-  // ?debug_geo=1 のときだけ表示
-  if (typeof window !== "undefined") {
-    const qs = new URLSearchParams(window.location.search);
-    if (qs.get("debug_geo") === "1") {
-      return (
-        <div
-          style={{
-            position: "fixed",
-            right: 12,
-            bottom: 12,
-            zIndex: 9999,
-            maxWidth: 460,
-            background: "rgba(0,0,0,0.75)",
-            border: "1px solid rgba(255,255,255,0.15)",
-            borderRadius: 12,
-            padding: 12,
-            color: "white",
-            fontSize: 12,
-            lineHeight: 1.4,
-            whiteSpace: "pre-wrap",
-          }}
-        >
-          <div style={{ fontWeight: 700, marginBottom: 6 }}>geo-full debug</div>
-          {dbg ? JSON.stringify(dbg, null, 2) : "sending..."}
-        </div>
-      );
-    }
-  }
-
+  // ✅ 画面には何も出さない
   return null;
 }
