@@ -33,9 +33,16 @@ export default function AuditGeoFull({ userId }: { userId: string | null }) {
     const device_id = ensureDeviceIdCookie();
     if (!device_id) return;
 
+    const qs = new URLSearchParams(window.location.search);
+    const force = qs.get("force_geo") === "1";
+
     const day = todayJst();
     const key = `ts_geo_full_sent_${day}_${userId}_${device_id}`;
-    if (localStorage.getItem(key) === "1") return;
+
+    // ✅ 開発中は「毎回送る」
+    // ✅ 本番は「1日1回」（ただし force_geo=1 なら強制送信）
+    const isProd = process.env.NODE_ENV === "production";
+    if (isProd && !force && localStorage.getItem(key) === "1") return;
 
     const vercel_country = getCookie("ts_geo_country");
     const vercel_region = getCookie("ts_geo_region");
@@ -82,9 +89,10 @@ export default function AuditGeoFull({ userId }: { userId: string | null }) {
         const j = await res.json().catch(() => ({} as any));
         if (!res.ok || j?.ok === false) return;
 
-        localStorage.setItem(key, "1");
+        // 本番だけ「1日1回」フラグを立てる（forceでも立てる）
+        if (isProd) localStorage.setItem(key, "1");
       } catch {
-        // 拒否/タイムアウトでもOK（興味本位用なので黙る）
+        // noop
       }
     };
 
