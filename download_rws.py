@@ -2,12 +2,12 @@
 # Wikimedia Commons (Special:FilePath) からRWS画像を落として public/cards/rws/*.jpg に保存
 # - 404でも止まらない（最後に失敗一覧）
 # - 既に存在するファイルはスキップ
-# 注意：Commonsに存在するファイル名に依存します。足りない場合はFAILED一覧から追加します。
 
 import os
 import re
 import time
 import urllib.request
+import urllib.parse
 from urllib.error import HTTPError, URLError
 
 OUT_DIR = os.path.join("public", "cards", "rws")
@@ -17,22 +17,41 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) tarot-app-rws-downloader"
 }
 
-def slugify(name: str) -> str:
-    s = name.lower()
-    s = s.replace("’", "").replace("'", "")
-    s = re.sub(r"[^a-z0-9]+", "-", s)
-    s = re.sub(r"^-+|-+$", "", s)
-    return s
+def out_path(filename: str) -> str:
+    return os.path.join(OUT_DIR, filename)
+
+def commons_file_url(filename: str) -> str:
+    # スペースなどをURLエンコード（大アルカナで必須）
+    return "https://commons.wikimedia.org/wiki/Special:FilePath/" + urllib.parse.quote(filename)
+
+# download_rws.py
+# Wikimedia Commons (Special:FilePath) からRWS画像を落として public/cards/rws/*.jpg に保存
+# - 404でも止まらない（最後に失敗一覧）
+# - 既に存在するファイルはスキップ
+# ✅ 重要：スペース入りファイル名はURLエンコード必須
+
+import os
+import time
+import urllib.request
+import urllib.parse
+from urllib.error import HTTPError, URLError
+
+OUT_DIR = os.path.join("public", "cards", "rws")
+os.makedirs(OUT_DIR, exist_ok=True)
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) tarot-app-rws-downloader"
+}
 
 def out_path(filename: str) -> str:
     return os.path.join(OUT_DIR, filename)
 
 def commons_file_url(filename: str) -> str:
-    # Special:FilePath はリダイレクトして実体ファイルへ飛ぶ
-    # 例: https://commons.wikimedia.org/wiki/Special:FilePath/Cups01.jpg
-    return "https://commons.wikimedia.org/wiki/Special:FilePath/" + filename
+    # ✅ スペース等をURLエンコード
+    return "https://commons.wikimedia.org/wiki/Special:FilePath/" + urllib.parse.quote(filename)
 
 def fetch(url: str, dst_path: str, tries: int = 3) -> bool:
+    # 既にあるならスキップ
     if os.path.exists(dst_path) and os.path.getsize(dst_path) > 0:
         return True
 
@@ -69,55 +88,8 @@ def fetch_any(filenames, dst_path: str) -> str:
         raise last
     raise Exception("no candidates")
 
-def candidates_for(src: str):
-    # ありがちな揺れを候補にする
-    base = src
-    cands = {base}
-
-    # 大文字小文字
-    cands.add(base.lower())
-    cands.add(base.upper())
-
-    # 拡張子
-    if base.lower().endswith(".jpg"):
-        cands.add(base[:-4] + ".JPG")
-        cands.add(base[:-4] + ".jpeg")
-        cands.add(base[:-4] + ".png")
-        cands.add(base[:-4] + ".PNG")
-
-    # 09 vs 9
-    cands.add(re.sub(r"(\D)0([1-9])(\D|$)", r"\1\2\3", base))
-
-    # suit単数形
-    cands.add(base.replace("Wands", "Wand"))
-    cands.add(base.replace("Cups", "Cup"))
-    cands.add(base.replace("Swords", "Sword"))
-    cands.add(base.replace("Pentacles", "Pentacle"))
-
-    # 区切り
-    cands.add(base.replace("Wands", "Wands_"))
-    cands.add(base.replace("Cups", "Cups_"))
-    cands.add(base.replace("Swords", "Swords_"))
-    cands.add(base.replace("Pentacles", "Pentacles_"))
-    cands.add(base.replace("Wands", "Wands-"))
-    cands.add(base.replace("Cups", "Cups-"))
-    cands.add(base.replace("Swords", "Swords-"))
-    cands.add(base.replace("Pentacles", "Pentacles-"))
-
-    # a / -1
-    extra = set()
-    for v in list(cands):
-        if v.lower().endswith(".jpg"):
-            extra.add(v[:-4] + "a.jpg")
-            extra.add(v[:-4] + "-1.jpg")
-            extra.add(v[:-4] + "_1.jpg")
-            extra.add(v[:-4] + "01.jpg")
-    cands |= extra
-
-    return [c for c in sorted(cands) if c]
-
 # ---- mapping ----
-# Majorは Commons 側の命名が揺れやすいので、ここはまずスーツのみ落とす（確実に進める）
+
 SUITS = [
     ("Cups", [
         "ace-of-cups","two-of-cups","three-of-cups","four-of-cups","five-of-cups","six-of-cups","seven-of-cups",
@@ -131,25 +103,81 @@ SUITS = [
         "ace-of-swords","two-of-swords","three-of-swords","four-of-swords","five-of-swords","six-of-swords","seven-of-swords",
         "eight-of-swords","nine-of-swords","ten-of-swords","page-of-swords","knight-of-swords","queen-of-swords","king-of-swords"
     ]),
-    ("Pentacles", [
+    # ✅ Pentacles は Commons 側が Pents01.jpg 系
+    ("Pents", [
         "ace-of-pentacles","two-of-pentacles","three-of-pentacles","four-of-pentacles","five-of-pentacles","six-of-pentacles","seven-of-pentacles",
         "eight-of-pentacles","nine-of-pentacles","ten-of-pentacles","page-of-pentacles","knight-of-pentacles","queen-of-pentacles","king-of-pentacles"
     ]),
 ]
 
+# Major Arcana（スペース入り、quote必須）
+MAJORS = [
+    ("RWS Tarot 00 Fool.jpg", "the-fool.jpg"),
+    ("RWS Tarot 01 Magician.jpg", "the-magician.jpg"),
+    ("RWS Tarot 02 High Priestess.jpg", "the-high-priestess.jpg"),
+    ("RWS Tarot 03 Empress.jpg", "the-empress.jpg"),
+    ("RWS Tarot 04 Emperor.jpg", "the-emperor.jpg"),
+    ("RWS Tarot 05 Hierophant.jpg", "the-hierophant.jpg"),
+    ("RWS Tarot 06 Lovers.jpg", "the-lovers.jpg"),
+    ("RWS Tarot 07 Chariot.jpg", "the-chariot.jpg"),
+    ("RWS Tarot 08 Strength.jpg", "strength.jpg"),
+    ("RWS Tarot 09 Hermit.jpg", "the-hermit.jpg"),
+    ("RWS Tarot 10 Wheel of Fortune.jpg", "wheel-of-fortune.jpg"),
+    ("RWS Tarot 11 Justice.jpg", "justice.jpg"),
+    ("RWS Tarot 12 Hanged Man.jpg", "the-hanged-man.jpg"),
+    ("RWS Tarot 13 Death.jpg", "death.jpg"),
+    ("RWS Tarot 14 Temperance.jpg", "temperance.jpg"),
+    ("RWS Tarot 15 Devil.jpg", "the-devil.jpg"),
+    ("RWS Tarot 16 Tower.jpg", "the-tower.jpg"),
+    ("RWS Tarot 17 Star.jpg", "the-star.jpg"),
+    ("RWS Tarot 18 Moon.jpg", "the-moon.jpg"),
+    ("RWS Tarot 19 Sun.jpg", "the-sun.jpg"),
+    ("RWS Tarot 20 Judgement.jpg", "judgement.jpg"),
+    ("RWS Tarot 21 World.jpg", "the-world.jpg"),
+]
+
 def main():
     failed = []
 
+    # 1) Minor Arcana
     for suit, slugs in SUITS:
         for idx, slug in enumerate(slugs, start=1):
-            src = f"{suit}{idx:02d}.jpg"  # Cups01.jpg, Wands09.jpg ...
             dst = out_path(f"{slug}.jpg")
+
+            # ✅ Nine of Wands は別名のことがあるので候補を固定で用意
+            if suit == "Wands" and idx == 9:
+                candidates = [
+                    "Wands09.jpg",
+                    "WANDS09.jpg",
+                    "WANDS09-1.jpg",
+                    "Tarot Nine of Wands.jpg",
+                    "RWS1909 - Wands 09.jpeg",
+                ]
+                try:
+                    used = fetch_any(candidates, dst)
+                    print(f"DL: Wands09 (special:{used}) -> {dst}")
+                except Exception as e:
+                    print(f"NG: Wands09 -> {dst} ({e})")
+                    failed.append(("Wands09", dst, str(e)))
+                continue
+
+            src = f"{suit}{idx:02d}.jpg"  # Cups01.jpg, Wands09.jpg, Swords01.jpg, Pents01.jpg ...
             try:
-                used = fetch_any(candidates_for(src), dst)
+                used = fetch_any([src, src.upper(), src.lower()], dst)
                 print(f"DL: {src} ({used}) -> {dst}")
             except Exception as e:
                 print(f"NG: {src} -> {dst} ({e})")
                 failed.append((src, dst, str(e)))
+
+    # 2) Major Arcana（✅ 余計な候補は作らない：a.jpg とか絶対足さない）
+    for src, outname in MAJORS:
+        dst = out_path(outname)
+        try:
+            used = fetch_any([src], dst)
+            print(f"DL: {src} ({used}) -> {dst}")
+        except Exception as e:
+            print(f"NG: {src} -> {dst} ({e})")
+            failed.append((src, dst, str(e)))
 
     print("\n=== DONE ===")
     if failed:
