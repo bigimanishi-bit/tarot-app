@@ -5,12 +5,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../src/lib/supabaseClient";
-import {
-  loadScope,
-  isScopeReady,
-  scopeLabel,
-  type TarotScope,
-} from "../../src/lib/scope";
+import { loadScope, isScopeReady, scopeLabel, type TarotScope } from "../../src/lib/scope";
 
 type ChatMsg = {
   id: string;
@@ -37,7 +32,6 @@ function makeId() {
 }
 
 function storageKey(scope: TarotScope) {
-  // scopeで完全分離（混ざらない）
   if (scope.targetType === "self") return "ts_chat_self";
   return `ts_chat_client_${scope.clientProfileId}`;
 }
@@ -46,7 +40,6 @@ export default function ChatPage() {
   const router = useRouter();
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
-  // ✅ Hooks は必ず最上段で全部呼ぶ（条件で増減させない）
   const [booting, setBooting] = useState(true);
   const [status, setStatus] = useState<string>("loading...");
   const [userEmail, setUserEmail] = useState<string | null>(null);
@@ -57,7 +50,7 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
 
-    // newから渡す seed（あれば最初に流す）
+  // newから渡す seed（あれば最初に流す）
   const seed = useMemo(() => {
     return safeJsonParse<{
       deckKey?: string;
@@ -65,16 +58,17 @@ export default function ChatPage() {
       tone?: string;
       draft?: string;
       createdAt?: number;
-
-      // ✅ Newの一時鑑定結果（Chat先頭に差し込む）
       initialReadingText?: string | null;
-
-      // 将来増えても落ちないように（必要なら使う）
       scope?: any;
     }>(typeof window !== "undefined" ? localStorage.getItem("tarot_chat_seed") : null);
   }, []);
 
-  // auth + scope 必須
+  // ✅ seedの値を「このチャットの状態」として保持（seed削除後も使えるように）
+  const [seedDeckKey] = useState<string | null>(seed?.deckKey ?? null);
+  const [seedSpread] = useState<string | null>(seed?.spread ?? null);
+  const [seedTone] = useState<string | null>(seed?.tone ?? null);
+  const [seedInitialReadingText] = useState<string | null>(seed?.initialReadingText ?? null);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -82,9 +76,7 @@ export default function ChatPage() {
       setBooting(true);
       setStatus("loading...");
 
-      const { data: sessionData, error: sessionErr } =
-        await supabase.auth.getSession();
-
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
       if (cancelled) return;
 
       if (sessionErr) {
@@ -117,74 +109,67 @@ export default function ChatPage() {
     };
   }, [router]);
 
- // scope が決まったら、そのscope専用のチャットログを読み込む
-useEffect(() => {
-  if (booting) return;
-  if (!scope) return;
+  // scope が決まったら、そのscope専用のチャットログを読み込む
+  useEffect(() => {
+    if (booting) return;
+    if (!scope) return;
 
-  const key = storageKey(scope);
-  const saved = safeJsonParse<ChatMsg[]>(localStorage.getItem(key));
-  if (saved?.length) {
-    setMessages(saved);
-    return;
-  }
+    const key = storageKey(scope);
+    const saved = safeJsonParse<ChatMsg[]>(localStorage.getItem(key));
+    if (saved?.length) {
+      setMessages(saved);
+      return;
+    }
 
-  // 初回だけ seed があれば差し込む（new→chatの相談用）
-  if (seed?.draft?.trim()) {
-    const initial: ChatMsg[] = [
+    if (seed?.draft?.trim()) {
+      const initial: ChatMsg[] = [
+        {
+          id: makeId(),
+          role: "system",
+          text:
+            "Welcomeで選んだscopeの相談ルームです（混ざりません）。\n必要なら下の内容から相談を続けてください。",
+          createdAt: Date.now(),
+        },
+        ...(seed?.initialReadingText?.trim()
+          ? [
+              {
+                id: makeId(),
+                role: "assistant",
+                text:
+                  "【一時鑑定（Newの結果）】\n" +
+                  seed.initialReadingText.trim() +
+                  "\n\n（この内容を前提に、ここから質問してOK）",
+                createdAt: Date.now(),
+              } as ChatMsg,
+            ]
+          : []),
+        {
+          id: makeId(),
+          role: "user",
+          text: seed.draft.trim(),
+          createdAt: Date.now(),
+        },
+      ];
+
+      setMessages(initial);
+
+      try {
+        localStorage.removeItem("tarot_chat_seed");
+      } catch {}
+
+      return;
+    }
+
+    setMessages([
       {
         id: makeId(),
         role: "system",
         text:
-          "Welcomeで選んだscopeの相談ルームです（混ざりません）。\n必要なら下の内容から相談を続けてください。",
+          "ここは相談用Chatです。\nNewで鑑定 → 追加の疑問が出たらここで相談、の流れでOK。",
         createdAt: Date.now(),
       },
-
-      // ✅ Newの一時鑑定があるなら、先頭に入れる（以後これを前提に質問できる）
-      ...(seed?.initialReadingText?.trim()
-        ? [
-            {
-              id: makeId(),
-              role: "assistant",
-              text:
-                "【一時鑑定（Newの結果）】\n" +
-                seed.initialReadingText.trim() +
-                "\n\n（この内容を前提に、ここから質問してOK）",
-              createdAt: Date.now(),
-            } as ChatMsg,
-          ]
-        : []),
-
-      {
-        id: makeId(),
-        role: "user",
-        text: seed.draft.trim(),
-        createdAt: Date.now(),
-      },
-    ];
-
-    setMessages(initial);
-
-    // seed は一度使ったら消す（混線防止）
-    try {
-      localStorage.removeItem("tarot_chat_seed");
-    } catch {}
-
-    return;
-  }
-
-  // 何もない場合は軽い案内だけ
-  setMessages([
-    {
-      id: makeId(),
-      role: "system",
-      text:
-        "ここは相談用Chatです。\nNewで鑑定 → 追加の疑問が出たらここで相談、の流れでOK。",
-      createdAt: Date.now(),
-    },
-  ]);
-}, [booting, scope, seed]); // eslint-disable-line react-hooks/exhaustive-deps
-// eslint-disable-line react-hooks/exhaustive-deps
+    ]);
+  }, [booting, scope, seed]);
 
   // messages 保存（scopeごと）
   useEffect(() => {
@@ -209,96 +194,80 @@ useEffect(() => {
   }
 
   async function send() {
-  if (sending) return;
-  const text = input.trim();
-  if (!text) return;
-  if (!scope) return;
+    if (sending) return;
+    const text = input.trim();
+    if (!text) return;
+    if (!scope) return;
 
-  const userMsg: ChatMsg = {
-    id: makeId(),
-    role: "user",
-    text,
-    createdAt: Date.now(),
-  };
+    const userMsg: ChatMsg = { id: makeId(), role: "user", text, createdAt: Date.now() };
 
-  setMessages((prev) => [...prev, userMsg]);
-  setInput("");
-  setSending(true);
-  setStatus("sending...");
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
+    setSending(true);
+    setStatus("sending...");
 
-  try {
-    // ✅ Supabaseのaccess tokenを取ってBearerで渡す（APIが必須）
-    const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
-    const token = sessionData?.session?.access_token ?? null;
-    if (sessionErr || !token) {
-      throw new Error("session token is missing");
+    try {
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
+      const token = sessionData?.session?.access_token ?? null;
+      if (sessionErr || !token) throw new Error("session token is missing");
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          question: text,
+
+          // ✅ 辞書参照に必要（意味質問のときに deck_library.dictionary を引く）
+          deckKey: seedDeckKey,
+
+          // 任意（残しとく）
+          spread: seedSpread,
+          tone: seedTone,
+
+          // ✅ Newの結果を「背景」として渡す（会話は普通、占い師口調にはしない）
+          initialReadingText: seedInitialReadingText,
+          scopeLabel: scopeLabel(scope),
+
+          // 履歴（systemは混ざってもAPI側でuser/assistantだけ拾う）
+          messages: messages.map((m) => ({
+            role: m.role,
+            content: m.text,
+          })),
+
+          theme: scopeLabel(scope),
+          title: "Chat follow-up",
+
+          scope,
+        }),
+      });
+
+      const data = (await res.json().catch(() => null)) as any;
+
+      if (!res.ok) {
+        const msg = data?.error ?? data?.message ?? `api error: ${res.status}`;
+        throw new Error(msg);
+      }
+
+      const reply = String(data?.readingText ?? "").trim();
+      setMessages((prev) => [
+        ...prev,
+        { id: makeId(), role: "assistant", text: reply || "（返答が空でした）", createdAt: Date.now() },
+      ]);
+      setStatus("ok");
+    } catch (e: any) {
+      setMessages((prev) => [
+        ...prev,
+        { id: makeId(), role: "assistant", text: `（送信に失敗）\n${e?.message ?? "error"}`, createdAt: Date.now() },
+      ]);
+      setStatus(e?.message ?? "error");
+    } finally {
+      setSending(false);
     }
-
-    // ✅ APIの期待に合わせる（question / deckKey / spread / tone / messages）
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        question: text,
-
-        // 任意（route.ts側が拾う）
-        deckKey: seed?.deckKey ?? null,
-        spread: seed?.spread ?? null,
-        tone: seed?.tone ?? null,
-
-        // 履歴も渡す（route.tsは最後のuser拾えるし、保存にも使える）
-        messages: messages.map((m) => ({
-          role: m.role,
-          content: m.text,
-        })),
-
-        // 保存用のラベル（readingsに入る）
-        theme: scopeLabel(scope),
-        title: "Chat follow-up",
-
-        // 参考として渡してもOK（route.tsは今は未使用だけど害はない）
-        scope,
-      }),
-    });
-
-    const data = (await res.json().catch(() => null)) as any;
-
-    if (!res.ok) {
-      const msg = data?.error ?? data?.message ?? `api error: ${res.status}`;
-      throw new Error(msg);
-    }
-
-    const reply = String(data?.readingText ?? "").trim();
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: makeId(),
-        role: "assistant",
-        text: reply || "（返答が空でした）",
-        createdAt: Date.now(),
-      },
-    ]);
-    setStatus("ok");
-  } catch (e: any) {
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: makeId(),
-        role: "assistant",
-        text: `（送信に失敗）\n${e?.message ?? "error"}`,
-        createdAt: Date.now(),
-      },
-    ]);
-    setStatus(e?.message ?? "error");
-  } finally {
-    setSending(false);
   }
-}
 
-  // ✅ 早期returnは Hooks の後ならOK
   if (booting) {
     return (
       <main className="min-h-screen bg-[#0B1020] text-white">
@@ -313,7 +282,6 @@ useEffect(() => {
 
   return (
     <main className="min-h-screen bg-[#0B1020] text-white">
-      {/* 背景（loginと統一） */}
       <div className="pointer-events-none fixed inset-0">
         <div
           className="absolute inset-0"
@@ -327,7 +295,6 @@ useEffect(() => {
         <Stars />
       </div>
 
-      {/* sticky header（TarotStudio押したらWelcomeへ） */}
       <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/60 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 md:px-6">
           <Link
@@ -341,8 +308,7 @@ useEffect(() => {
             <span
               className="text-base font-semibold tracking-tight text-white md:text-lg"
               style={{
-                fontFamily:
-                  'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+                fontFamily: 'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
               }}
             >
               Tarot Studio
@@ -383,8 +349,7 @@ useEffect(() => {
           <h1
             className="text-2xl font-semibold tracking-tight text-white md:text-3xl"
             style={{
-              fontFamily:
-                'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+              fontFamily: 'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
             }}
           >
             Chat
@@ -393,8 +358,7 @@ useEffect(() => {
             追加の疑問・深掘り相談をここで。scopeはWelcomeでだけ切り替え（混線防止）。
           </p>
           <p className="mt-1 text-xs text-white/45">
-            {userEmail ? `ログイン中：${userEmail}` : ""}{" "}
-            {status && status !== "ok" ? ` / ${status}` : ""}
+            {userEmail ? `ログイン中：${userEmail}` : ""} {status && status !== "ok" ? ` / ${status}` : ""}
           </p>
         </header>
 
