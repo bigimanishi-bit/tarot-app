@@ -109,11 +109,18 @@ function stripCardNamesSafely(text: string) {
   return out;
 }
 
+type ToneKey = "warm" | "neutral" | "direct";
+
 type GenerateInput = {
   theme: string;
   title?: string;
   mode: "normal" | "dictionary";
   cards_text: string;
+
+  // ✅ 任意（/new から渡す）
+  deck_key?: string;
+  spread_key?: string;
+  tone?: ToneKey | string;
 };
 
 export async function generateReadingText(input: GenerateInput) {
@@ -125,6 +132,15 @@ export async function generateReadingText(input: GenerateInput) {
   const client = new OpenAI({ apiKey });
   const parsed = normalizeCardsText(input.cards_text);
 
+  const toneHint =
+    input.tone === "warm"
+      ? "文体はやわらかく、余韻を残す。断定を避ける。"
+      : input.tone === "neutral"
+      ? "文体は落ち着いて整理する。断定は避け、可能性で述べる。"
+      : input.tone === "direct"
+      ? "文体ははっきり。余計な前置きは省く。ただし攻撃的にはしない。"
+      : "文体は落ち着いて、占い師として自然に。";
+
   const modeHint =
     input.mode === "dictionary"
       ? [
@@ -132,21 +148,32 @@ export async function generateReadingText(input: GenerateInput) {
           "カード名の使用OK。",
           "カードごとに「核／出やすい現れ方／注意」。",
           "最後に2〜3行だけ鑑定（まとめ＋一手＋確度）。",
+          "長さは800〜1200字を目安（長すぎ禁止）。",
         ].join("\n")
       : [
           "あなたは通常鑑定モード。",
           "本文でカード名を一切出さない（カード名ゼロ）。",
           "番号列を使わない。",
           "見出し横の括弧（）を使わない。",
-          "一般論の説教に寄せず、占いとして「流れ・山場・分岐・鍵」を厚めに語る。",
-          "文字数は最低1000文字（短すぎ禁止）。",
-          "最後に一手（低侵襲）を1つだけ（名詞＋動詞）。",
-          "最後に確度（高/中/低）を1行。",
+          "説教や一般論に逃げず、占いとして「流れ・山場・分岐・鍵」を語る。",
+          "長さは550〜850字を目安（長すぎ禁止）。",
+          "構成は必ず次の順で出す：",
+          "1) いまの流れ（2〜3文）",
+          "2) 山場（何が引っ掛かっているか）",
+          "3) 分岐（こう動くとこうなる、の二股）",
+          "4) 鍵（今ここだけ押さえる一点）",
+          "5) 一手（名詞＋動詞で1行、低侵襲）",
+          "6) 確度（高/中/低 を1行）",
+          "質問で返さない（追加質問禁止）。",
+          toneHint,
         ].join("\n");
 
   const userText = [
     `テーマ: ${input.theme}`,
     input.title ? `タイトル: ${input.title}` : "",
+    input.deck_key ? `デッキ: ${input.deck_key}` : "",
+    input.spread_key ? `スプレッドKey: ${input.spread_key}` : "",
+    input.tone ? `トーン: ${String(input.tone)}` : "",
     `モード: ${input.mode}`,
     `スプレッド: ${parsed.spread}`,
     `カード:`,
@@ -162,7 +189,8 @@ export async function generateReadingText(input: GenerateInput) {
       { role: "system", content: modeHint },
       { role: "user", content: userText },
     ],
-    temperature: 0.9,
+    temperature: 0.7,
+    max_tokens: input.mode === "dictionary" ? 900 : 700,
   });
 
   let text = res.choices?.[0]?.message?.content?.trim() ?? "";

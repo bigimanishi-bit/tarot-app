@@ -16,11 +16,19 @@ export async function POST(req: Request) {
     // ✅ どっちでも受ける（cardsText / cards_text）
     const cardsText = String(body?.cardsText ?? body?.cards_text ?? "");
 
+    // ✅ 追加：任意（未送信でも壊れない）
+    const deckKey = String(body?.deckKey ?? "");
+    const spreadKey = String(body?.spreadKey ?? "");
+    const tone = String(body?.tone ?? "");
+
     const out = await generateReadingText({
       theme,
       title,
       mode,
       cards_text: cardsText,
+      deck_key: deckKey || undefined,
+      spread_key: spreadKey || undefined,
+      tone: (tone as any) || undefined,
     });
 
     return NextResponse.json({

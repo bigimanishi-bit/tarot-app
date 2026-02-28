@@ -46,32 +46,40 @@ function clsx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
 }
 
+/**
+ * ✅ 重要：normalizeCardsText が「役割付き」を検出できるように
+ * PRESETのカード欄を “現状/本音/障害…” のラベル形式に統一。
+ */
 const PRESETS = [
   {
     key: "love_5",
     title: "恋愛：相手の気持ち（5枚）",
-    desc: "現状/本音/ブロック/行動/未来",
+    desc: "現状/相手/本音/障害/打開",
     spread: "five_feelings" as SpreadKey,
     tone: "direct" as ToneKey,
-    // ✅ APIのcardsTextにそのまま投げる想定（「カード一覧」欄にユーザーが入力）
     text:
-      "【恋愛】相手の気持ち\n" +
-      "状況を簡潔に：\n\n" +
-      "カード一覧（1〜5）：\n" +
-      "1)\n2)\n3)\n4)\n5)\n\n" +
+      "【恋愛】相手の気持ち（5枚）\n" +
+      "状況（短く）：\n\n" +
+      "現状：\n" +
+      "相手（または環境）：\n" +
+      "本音：\n" +
+      "障害：\n" +
+      "打開：\n\n" +
       "補足（あれば）：",
   },
   {
     key: "work_3",
     title: "仕事：現状/課題/アドバイス（3枚）",
-    desc: "短く見たい時",
+    desc: "短く、要点で",
     spread: "past_present_future" as SpreadKey,
     tone: "neutral" as ToneKey,
     text:
-      "【仕事】現状/課題/アドバイス\n\n" +
-      "カード一覧（1〜3）：\n" +
-      "1)\n2)\n3)\n\n" +
-      "補足：",
+      "【仕事】現状/課題/アドバイス（3枚）\n\n" +
+      "状況（短く）：\n\n" +
+      "現状：\n" +
+      "課題：\n" +
+      "助言：\n\n" +
+      "補足（あれば）：",
   },
   {
     key: "simple_1",
@@ -81,9 +89,9 @@ const PRESETS = [
     tone: "direct" as ToneKey,
     text:
       "【1枚】今必要なメッセージ\n\n" +
-      "カード：\n" +
-      "1)\n\n" +
-      "補足：",
+      "状況（短く）：\n\n" +
+      "助言：\n\n" +
+      "補足（あれば）：",
   },
 ];
 
@@ -224,11 +232,9 @@ export default function NewPage() {
     setResultText(null);
 
     try {
-      // theme/title は今の /api/generate の仕様に合わせる
-      const theme = scopeLabel(scope); // 表示用でもOK
+      const theme = scopeLabel(scope);
       const title = `New / ${deckKey} / ${spreadLabel} / ${toneLabel}`;
 
-      // ✅ “質問しない”を cardsText に明示（readingGenerator側がプロンプトで抑制できる）
       const guard =
         "\n\n【ルール】AIはユーザーに追加質問をしない。鑑定文だけで完結させる。";
 
@@ -239,6 +245,9 @@ export default function NewPage() {
           theme,
           title,
           mode: "normal",
+          deckKey,
+          spreadKey: spread,
+          tone,
           cardsText: String(draft ?? "") + guard,
         }),
       });
