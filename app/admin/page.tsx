@@ -17,18 +17,25 @@ async function getToken() {
 }
 
 function pickLatLng(row: any): { lat: number; lng: number } | null {
-  // geo-full
   const lat1 = typeof row?.latitude === "number" ? row.latitude : Number(row?.latitude);
   const lng1 = typeof row?.longitude === "number" ? row.longitude : Number(row?.longitude);
   if (Number.isFinite(lat1) && Number.isFinite(lng1) && lat1 !== 0 && lng1 !== 0) {
     return { lat: lat1, lng: lng1 };
   }
 
-  // geo-daily
   const lat2 = typeof row?.lat_round === "number" ? row.lat_round : Number(row?.lat_round);
   const lng2 = typeof row?.lng_round === "number" ? row.lng_round : Number(row?.lng_round);
   if (Number.isFinite(lat2) && Number.isFinite(lng2) && lat2 !== 0 && lng2 !== 0) {
     return { lat: lat2, lng: lng2 };
+  }
+
+  // geo-full に日次座標も合体して返すので、それも地図リンクに使える
+  const lat3 =
+    typeof row?.daily_lat_round === "number" ? row.daily_lat_round : Number(row?.daily_lat_round);
+  const lng3 =
+    typeof row?.daily_lng_round === "number" ? row.daily_lng_round : Number(row?.daily_lng_round);
+  if (Number.isFinite(lat3) && Number.isFinite(lng3) && lat3 !== 0 && lng3 !== 0) {
+    return { lat: lat3, lng: lng3 };
   }
 
   return null;
@@ -48,7 +55,8 @@ export default function AdminPage() {
 
   const endpoint = useMemo(() => {
     if (tab === "geo") return "/api/admin/geo";
-    if (tab === "geo_full") return "/api/admin/geo-full";
+    // ✅ geo-full は住所付きAPIに切替
+    if (tab === "geo_full") return "/api/admin/geo-full-plus";
     if (tab === "devices") return "/api/admin/devices";
     return "/api/admin/access";
   }, [tab]);
@@ -100,7 +108,6 @@ export default function AdminPage() {
   }, [rows]);
 
   const showMapCol = useMemo(() => {
-    // どれか1件でも座標が取れるならMap列を出す
     return rows.some((r) => !!pickLatLng(r));
   }, [rows]);
 
@@ -134,7 +141,7 @@ export default function AdminPage() {
               GPS(日次)
             </TabBtn>
             <TabBtn active={tab === "geo_full"} onClick={() => setTab("geo_full")}>
-              GPS(全部)
+              GPS(全部)+住所
             </TabBtn>
             <TabBtn active={tab === "devices"} onClick={() => setTab("devices")}>
               端末固定
@@ -235,7 +242,7 @@ export default function AdminPage() {
         </div>
 
         <div className="mt-3 text-[11px] text-white/45">
-          ※ GPS(日次)は丸め座標、GPS(全部)は生座標。Mapは座標がある行だけ表示。
+          ※ GPS(全部)はFULLログに “日次の住所” を合体して表示してます（APIで合体）。
         </div>
       </div>
     </main>
