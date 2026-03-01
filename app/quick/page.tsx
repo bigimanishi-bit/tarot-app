@@ -164,7 +164,7 @@ export default function QuickPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           theme,
-          title: "AI占い鑑定室",
+          title: "AI",
           mode: "normal",
           cardsText: buildCardsText() + guard,
         }),
@@ -241,18 +241,18 @@ export default function QuickPage() {
       <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/60 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 md:px-6">
           <Link
-            href="/welcome"
-            className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 transition hover:bg-white/5"
-            aria-label="Home"
-          >
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/10 text-xs font-semibold text-white/80">
-              TS
-            </span>
-            <span className="text-base font-semibold tracking-tight text-white md:text-lg">
-              Tarot Studio
-            </span>
-          </Link>
+  href="/welcome"
+  className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 transition hover:bg-white/5"
+  aria-label="Home"
+>
+  <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/10 text-xs font-semibold text-white/80">
+    TS
+  </span>
 
+  <span className="text-lg font-semibold tracking-tight text-white md:text-xl">
+    Tarot Studio
+  </span>
+</Link>
           <button
             type="button"
             onClick={logout}
@@ -266,7 +266,9 @@ export default function QuickPage() {
       {/* content */}
       <div className="relative mx-auto max-w-6xl px-4 py-6 pb-28 md:px-6 md:py-10 md:pb-32">
         <header className="mb-4">
-          <h1 className="text-3xl tracking-tight text-white md:text-5xl">AI</h1>
+      <h1 className="text-2xl tracking-tight text-white md:text-4xl">
+  AI鑑定
+</h1>
           <div className="mt-1 text-xs text-white/55">選択：{scopeLabel(scope)}</div>
         </header>
 
@@ -324,7 +326,7 @@ export default function QuickPage() {
             <section className="lg:col-span-3 space-y-4 md:space-y-6">
               <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm sm:p-6">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold text-white/90">相談</div>
+                  <div className="text-sm font-semibold text-white/90">相談内容入力</div>
                   {question.trim() ? (
                     <button
                       type="button"
@@ -349,7 +351,7 @@ export default function QuickPage() {
 
               <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm sm:p-6">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold text-white/90">カード</div>
+                  <div className="text-sm font-semibold text-white/90">指針</div>
 
                   <div className="flex items-center gap-2">
                     {cards?.length ? (
@@ -443,7 +445,7 @@ export default function QuickPage() {
               href="/welcome"
               className="rounded-2xl border border-white/12 bg-white/8 px-4 py-3 text-center text-sm font-semibold text-white/85 hover:bg-white/12"
             >
-              ホーム
+              ホームに戻る
             </Link>
           </div>
         </div>
