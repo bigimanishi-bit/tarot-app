@@ -36,6 +36,106 @@ function storageKey(scope: TarotScope) {
   return `ts_chat_client_${scope.clientProfileId}`;
 }
 
+// ---- Weather (client) ----
+type WeatherPayload = {
+  locationLabel: string;
+  currentTempC: number | null;
+  todayMaxC: number | null;
+  todayMinC: number | null;
+  weatherLabel: string | null;
+};
+
+function weatherCodeLabel(code: number | null | undefined): string | null {
+  if (code == null) return null;
+  if (code === 0) return "快晴";
+  if (code === 1) return "晴れ";
+  if (code === 2) return "薄曇り";
+  if (code === 3) return "曇り";
+  if (code === 45 || code === 48) return "霧";
+  if (code === 51 || code === 53 || code === 55) return "霧雨";
+  if (code === 56 || code === 57) return "凍雨";
+  if (code === 61 || code === 63 || code === 65) return "雨";
+  if (code === 66 || code === 67) return "強い雨";
+  if (code === 71 || code === 73 || code === 75) return "雪";
+  if (code === 77) return "雪（細かい）";
+  if (code === 80 || code === 81 || code === 82) return "にわか雨";
+  if (code === 85 || code === 86) return "にわか雪";
+  if (code === 95) return "雷雨";
+  if (code === 96 || code === 99) return "雷雨（ひょう）";
+  return "天気";
+}
+
+async function fetchWeather(lat: number, lon: number): Promise<WeatherPayload> {
+  const url =
+    "https://api.open-meteo.com/v1/forecast" +
+    `?latitude=${encodeURIComponent(lat)}` +
+    `&longitude=${encodeURIComponent(lon)}` +
+    `&current=temperature_2m,weather_code` +
+    `&daily=temperature_2m_max,temperature_2m_min,weather_code` +
+    `&timezone=${encodeURIComponent("Asia/Tokyo")}`;
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`weather ${res.status}`);
+  const j = await res.json();
+
+  const curTemp =
+    typeof j?.current?.temperature_2m === "number" ? j.current.temperature_2m : null;
+  const curCode =
+    typeof j?.current?.weather_code === "number" ? j.current.weather_code : null;
+
+  const max0 =
+    Array.isArray(j?.daily?.temperature_2m_max) &&
+    typeof j.daily.temperature_2m_max[0] === "number"
+      ? j.daily.temperature_2m_max[0]
+      : null;
+
+  const min0 =
+    Array.isArray(j?.daily?.temperature_2m_min) &&
+    typeof j.daily.temperature_2m_min[0] === "number"
+      ? j.daily.temperature_2m_min[0]
+      : null;
+
+  const dCode0 =
+    Array.isArray(j?.daily?.weather_code) &&
+    typeof j.daily.weather_code[0] === "number"
+      ? j.daily.weather_code[0]
+      : null;
+
+  return {
+    locationLabel: "現在地",
+    currentTempC: curTemp,
+    todayMaxC: max0,
+    todayMinC: min0,
+    weatherLabel: weatherCodeLabel(curCode ?? dCode0),
+  };
+}
+
+// ---- Moon (client) ----
+function moonAgeDaysJST(now = new Date()): number {
+  const base = new Date("2024-01-11T11:57:00.000Z");
+  const synodic = 29.530588;
+  const diffDays = (now.getTime() - base.getTime()) / 86400000;
+  let age = diffDays % synodic;
+  if (age < 0) age += synodic;
+  return age;
+}
+function moonPhaseLabel(age: number): string {
+  if (age < 1.5) return "新月";
+  if (age < 7.4) return "上弦へ";
+  if (age < 8.9) return "上弦";
+  if (age < 14.8) return "満月へ";
+  if (age < 16.2) return "満月";
+  if (age < 22.1) return "下弦へ";
+  if (age < 23.6) return "下弦";
+  return "新月へ";
+}
+function moonPct(age: number) {
+  const syn = 29.530588;
+  const t = age / syn;
+  if (t <= 0.5) return Math.round((t / 0.5) * 100);
+  return Math.round((1 - (t - 0.5) / 0.5) * 100);
+}
+
 export default function ChatPage() {
   const router = useRouter();
   const bottomRef = useRef<HTMLDivElement | null>(null);
@@ -43,12 +143,19 @@ export default function ChatPage() {
   const [booting, setBooting] = useState(true);
   const [status, setStatus] = useState<string>("loading...");
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
 
   const [scope, setScope] = useState<TarotScope | null>(null);
 
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+
+  // ✅ 鑑定材料（Chatにも渡す）
+  const [userBirthDate, setUserBirthDate] = useState<string | null>(null);
+  const [clientBirthDate, setClientBirthDate] = useState<string | null>(null);
+  const [weather, setWeather] = useState<WeatherPayload | null>(null);
+  const [moon, setMoon] = useState<{ ageDays: number; phaseLabel: string; pct: number } | null>(null);
 
   // newから渡す seed（あれば最初に流す）
   const seed = useMemo(() => {
@@ -63,7 +170,6 @@ export default function ChatPage() {
     }>(typeof window !== "undefined" ? localStorage.getItem("tarot_chat_seed") : null);
   }, []);
 
-  // ✅ seedの値を「このチャットの状態」として保持（seed削除後も使えるように）
   const [seedDeckKey] = useState<string | null>(seed?.deckKey ?? null);
   const [seedSpread] = useState<string | null>(seed?.spread ?? null);
   const [seedTone] = useState<string | null>(seed?.tone ?? null);
@@ -91,6 +197,8 @@ export default function ChatPage() {
         return;
       }
 
+      const uid = session.user.id;
+      setUserId(uid);
       setUserEmail(session.user.email ?? null);
 
       const sc = loadScope();
@@ -98,8 +206,16 @@ export default function ChatPage() {
         router.replace("/welcome?reason=select_scope");
         return;
       }
-
       setScope(sc);
+
+      const { data: up } = await supabase
+        .from("user_profile")
+        .select("birth_date")
+        .eq("user_id", uid)
+        .maybeSingle();
+
+      if (!cancelled) setUserBirthDate((up as any)?.birth_date ?? null);
+
       setBooting(false);
       setStatus("ok");
     })();
@@ -109,7 +225,91 @@ export default function ChatPage() {
     };
   }, [router]);
 
-  // scope が決まったら、そのscope専用のチャットログを読み込む
+  // client birth_date
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      if (!scope) return;
+      if (scope.targetType !== "client" || !scope.clientProfileId) {
+        setClientBirthDate(null);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("client_profiles")
+        .select("birth_date")
+        .eq("id", scope.clientProfileId)
+        .maybeSingle();
+
+      if (cancelled) return;
+      if (error) {
+        setClientBirthDate(null);
+        return;
+      }
+      setClientBirthDate((data as any)?.birth_date ?? null);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [scope]);
+
+  // moon（1分ごと）
+  useEffect(() => {
+    const update = () => {
+      const age = moonAgeDaysJST(new Date());
+      setMoon({ ageDays: age, phaseLabel: moonPhaseLabel(age), pct: moonPct(age) });
+    };
+    update();
+    const t = setInterval(update, 60_000);
+    return () => clearInterval(t);
+  }, []);
+
+  // weather（起動時に1回）
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const getPos = () =>
+          new Promise<GeolocationPosition>((resolve, reject) => {
+            if (!navigator.geolocation) return reject(new Error("no geolocation"));
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: false,
+              timeout: 6000,
+              maximumAge: 10 * 60 * 1000,
+            });
+          });
+
+        let lat = 35.681236;
+        let lon = 139.767125;
+
+        try {
+          const pos = await getPos();
+          lat = pos.coords.latitude;
+          lon = pos.coords.longitude;
+        } catch {}
+
+        const w = await fetchWeather(lat, lon);
+        if (cancelled) return;
+
+        if (Math.abs(lat - 35.681236) < 0.01 && Math.abs(lon - 139.767125) < 0.01) {
+          w.locationLabel = "東京";
+        }
+        setWeather(w);
+      } catch {
+        if (cancelled) return;
+        setWeather(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // scopeが決まったらログ読み込み
   useEffect(() => {
     if (booting) return;
     if (!scope) return;
@@ -126,8 +326,7 @@ export default function ChatPage() {
         {
           id: makeId(),
           role: "system",
-          text:
-            "Welcomeで選んだscopeの相談ルームです（混ざりません）。\n必要なら下の内容から相談を続けてください。",
+          text: "Welcomeで選んだscopeの相談ルームです（混ざりません）。",
           createdAt: Date.now(),
         },
         ...(seed?.initialReadingText?.trim()
@@ -164,14 +363,13 @@ export default function ChatPage() {
       {
         id: makeId(),
         role: "system",
-        text:
-          "ここは相談用Chatです。\nNewで鑑定 → 追加の疑問が出たらここで相談、の流れでOK。",
+        text: "ここは つづき相談 です。\nNewで鑑定 → 追加の疑問が出たらここで相談。",
         createdAt: Date.now(),
       },
     ]);
   }, [booting, scope, seed]);
 
-  // messages 保存（scopeごと）
+  // 保存（scopeごと）
   useEffect(() => {
     if (!scope) return;
     const key = storageKey(scope);
@@ -220,18 +418,13 @@ export default function ChatPage() {
         body: JSON.stringify({
           question: text,
 
-          // ✅ 辞書参照に必要（意味質問のときに deck_library.dictionary を引く）
           deckKey: seedDeckKey,
-
-          // 任意（残しとく）
           spread: seedSpread,
           tone: seedTone,
 
-          // ✅ Newの結果を「背景」として渡す（会話は普通、占い師口調にはしない）
           initialReadingText: seedInitialReadingText,
           scopeLabel: scopeLabel(scope),
 
-          // 履歴（systemは混ざってもAPI側でuser/assistantだけ拾う）
           messages: messages.map((m) => ({
             role: m.role,
             content: m.text,
@@ -239,8 +432,16 @@ export default function ChatPage() {
 
           theme: scopeLabel(scope),
           title: "Chat follow-up",
-
           scope,
+
+          // 追加材料
+          userId,
+          targetType: scope.targetType,
+          clientProfileId: scope.targetType === "client" ? scope.clientProfileId : null,
+          userBirthDate,
+          clientBirthDate,
+          weather,
+          moon,
         }),
       });
 
@@ -268,6 +469,12 @@ export default function ChatPage() {
     }
   }
 
+  const chip = (on: boolean) =>
+    clsx(
+      "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold",
+      on ? "border-white/18 bg-white/12 text-white" : "border-white/10 bg-white/6 text-white/60"
+    );
+
   if (booting) {
     return (
       <main className="min-h-screen bg-[#0B1020] text-white">
@@ -281,10 +488,10 @@ export default function ChatPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#0B1020] text-white">
-      <div className="pointer-events-none fixed inset-0">
+    <main className="min-h-screen">
+      <div className="relative min-h-screen overflow-hidden bg-[#0B1020] text-white">
         <div
-          className="absolute inset-0"
+          className="pointer-events-none absolute inset-0"
           style={{
             background:
               "radial-gradient(1200px 700px at 18% 22%, rgba(120,140,255,0.18), transparent 60%)," +
@@ -293,130 +500,141 @@ export default function ChatPage() {
           }}
         />
         <Stars />
-      </div>
 
-      <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/60 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 md:px-6">
-          <Link
-            href="/welcome"
-            className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 transition hover:bg-white/5"
-            aria-label="Tarot Studio（Welcomeへ）"
-          >
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/10 text-xs font-semibold text-white/80">
-              TS
-            </span>
-            <span
-              className="text-base font-semibold tracking-tight text-white md:text-lg"
-              style={{
-                fontFamily: 'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
-              }}
-            >
-              Tarot Studio
-            </span>
-          </Link>
+        {/* ✅ Header（Welcomeと同型） */}
+        <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/55 backdrop-blur-xl">
+          <div className="mx-auto max-w-6xl px-4 py-3 md:px-6">
+            <div className="flex items-center justify-between gap-3">
+              <Link
+                href="/welcome"
+                className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 transition hover:bg-white/5"
+                aria-label="Tarot Studio（Welcomeへ）"
+              >
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/10 text-xs font-semibold text-white/80">
+                  TS
+                </span>
+                <span className="text-base font-semibold tracking-tight text-white md:text-lg">
+                  Tarot Studio
+                </span>
+                <span className="hidden rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-white/80 sm:inline-flex">
+                  招待制 / Invite only
+                </span>
+              </Link>
 
-          <div className="flex items-center gap-2">
-            <span className="hidden rounded-full border border-white/12 bg-white/8 px-3 py-1 text-xs font-semibold text-white/70 md:inline-flex">
-              {scope ? scopeLabel(scope) : "scope未選択"}
-            </span>
-
-            <Link
-              href="/new"
-              className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
-            >
-              New
-            </Link>
-
-            <Link
-              href="/read"
-              className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
-            >
-              History
-            </Link>
-
-            <button
-              onClick={logout}
-              className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
-            >
-              ログアウト
-            </button>
+              <div className="flex items-center gap-2">
+                <span className="hidden text-xs text-white/55 md:inline">
+                  {userEmail ? `ログイン中：${userEmail}` : ""}
+                </span>
+                <button
+                  onClick={logout}
+                  className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
+                >
+                  ログアウト
+                </button>
+              </div>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div className="relative mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-10">
-        <header className="mb-4">
-          <h1
-            className="text-2xl font-semibold tracking-tight text-white md:text-3xl"
-            style={{
-              fontFamily: 'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
-            }}
-          >
-            Chat
-          </h1>
-          <p className="mt-2 text-sm text-white/65">
-            追加の疑問・深掘り相談をここで。scopeはWelcomeでだけ切り替え（混線防止）。
-          </p>
-          <p className="mt-1 text-xs text-white/45">
-            {userEmail ? `ログイン中：${userEmail}` : ""} {status && status !== "ok" ? ` / ${status}` : ""}
-          </p>
-        </header>
-
-        <section className="rounded-[26px] border border-white/12 bg-white/6 p-4 shadow-[0_35px_110px_rgba(0,0,0,0.55)] backdrop-blur-2xl md:p-5">
-          <div className="h-[55vh] overflow-auto rounded-2xl border border-white/10 bg-white/5 p-4">
-            <div className="space-y-3">
-              {messages.map((m) => (
-                <div
-                  key={m.id}
-                  className={clsx(
-                    "max-w-[85%] whitespace-pre-wrap rounded-2xl border p-3 text-sm leading-7",
-                    m.role === "user"
-                      ? "ml-auto border-white/12 bg-white/10 text-white"
-                      : m.role === "assistant"
-                      ? "mr-auto border-white/10 bg-white/6 text-white/85"
-                      : "mx-auto border-white/8 bg-white/4 text-white/65"
-                  )}
-                >
-                  {m.text}
-                </div>
-              ))}
-              <div ref={bottomRef} />
+        {/* ✅ Footerぶん余白 */}
+        <div className="relative mx-auto max-w-6xl px-4 py-7 pb-28 md:px-6 md:py-10 md:pb-32">
+          <div className="mb-4 rounded-2xl border border-white/10 bg-white/7 px-5 py-4">
+            <div className="text-xs font-semibold tracking-[0.18em] text-white/55">CHAT</div>
+            <div className="mt-2 text-xl font-semibold text-white">つづき相談</div>
+            <div className="mt-1 text-sm text-white/55">scope：{scope ? scopeLabel(scope) : "—"}</div>
+            <div className="mt-1 text-xs text-white/45">
+              {status && status !== "ok" ? status : ""}
             </div>
           </div>
 
-          <div className="mt-4 grid gap-2 md:grid-cols-[1fr_auto] md:items-end">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="ここに相談を書く（Enterで改行）"
-              rows={3}
-              className="w-full resize-none rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white shadow-sm outline-none placeholder:text-white/35 focus:border-white/20"
-              disabled={sending}
-            />
+          <section className="rounded-[26px] border border-white/12 bg-white/6 p-4 shadow-[0_35px_110px_rgba(0,0,0,0.55)] backdrop-blur-2xl md:p-5">
+            {/* ✅ メッセージ欄は下固定入力のぶん高さ確保 */}
+            <div className="h-[62vh] overflow-auto rounded-2xl border border-white/10 bg-white/5 p-4">
+              <div className="space-y-3">
+                {messages.map((m) => (
+                  <div
+                    key={m.id}
+                    className={clsx(
+                      "max-w-[85%] whitespace-pre-wrap rounded-2xl border p-3 text-sm leading-7",
+                      m.role === "user"
+                        ? "ml-auto border-white/12 bg-white/10 text-white"
+                        : m.role === "assistant"
+                        ? "mr-auto border-white/10 bg-white/6 text-white/85"
+                        : "mx-auto border-white/8 bg-white/4 text-white/65"
+                    )}
+                  >
+                    {m.text}
+                  </div>
+                ))}
+                <div ref={bottomRef} />
+              </div>
+            </div>
 
-            <button
-              onClick={send}
-              disabled={sending || !input.trim()}
-              className={clsx(
-                "rounded-2xl border px-5 py-3 text-sm font-semibold shadow-sm transition",
-                sending || !input.trim()
-                  ? "cursor-not-allowed border-white/8 bg-white/5 text-white/35"
-                  : "border-white/15 bg-white/10 text-white hover:bg-white/14"
-              )}
-            >
-              {sending ? "送信中…" : "送信"}
-            </button>
+            <div className="mt-3 text-xs text-white/45">
+              ※入力と送信は下に固定されています
+            </div>
+          </section>
+        </div>
+
+        {/* ✅ Footer（Welcomeと同型：下固定CTA） */}
+        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#0B1020]/70 backdrop-blur-xl">
+          <div className="mx-auto max-w-6xl px-4 py-3 md:px-6">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-white/70">
+                <span className={chip(!!scope)}>{scope ? scopeLabel(scope) : "scope未選択"}</span>
+                <span className={chip(!sending)}>{sending ? "送信中…" : "待機中"}</span>
+                {!input.trim() ? <span className="text-white/45">※入力すると送信できます</span> : null}
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 md:flex md:items-center">
+                {/* 左：送信（モバイル主役） */}
+                <button
+                  type="button"
+                  onClick={send}
+                  disabled={sending || !input.trim()}
+                  className={clsx(
+                    "rounded-2xl border px-4 py-3 text-center text-sm font-semibold shadow-sm transition",
+                    sending || !input.trim()
+                      ? "cursor-not-allowed border-white/8 bg-white/5 text-white/35"
+                      : "border-white/18 bg-white/14 text-white hover:bg-white/18"
+                  )}
+                >
+                  {sending ? "送信中…" : "送信"}
+                </button>
+
+                {/* 右：履歴 / ホーム */}
+                <div className="grid grid-cols-2 gap-2">
+                  <Link
+                    href="/read"
+                    className="rounded-2xl border border-white/12 bg-white/8 px-3 py-3 text-center text-xs font-semibold text-white/85 hover:bg-white/12"
+                  >
+                    相談履歴
+                  </Link>
+
+                  <Link
+                    href="/welcome"
+                    className="rounded-2xl border border-white/12 bg-white/8 px-3 py-3 text-center text-xs font-semibold text-white/85 hover:bg-white/12"
+                  >
+                    ホーム
+                  </Link>
+                </div>
+              </div>
+            </div>
+
+            {/* ✅ 入力欄もフッター内に固定（モバイル最優先） */}
+            <div className="mt-2">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder="ここに相談を書く（Enterで改行）"
+                rows={2}
+                className="w-full resize-none rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white shadow-sm outline-none placeholder:text-white/35 focus:border-white/20"
+                disabled={sending}
+              />
+            </div>
           </div>
+        </div>
 
-          <div className="mt-3 flex items-center justify-between text-xs text-white/45">
-            <span>Tarot Studio / private beta</span>
-            <Link href="/welcome" className="hover:text-white/70">
-              scopeを切り替える（Welcome）
-            </Link>
-          </div>
-        </section>
-
-        <div className="h-10" />
       </div>
     </main>
   );
@@ -425,7 +643,7 @@ export default function ChatPage() {
 function Stars() {
   return (
     <div
-      className="absolute inset-0 opacity-70"
+      className="pointer-events-none absolute inset-0 opacity-70"
       style={{
         backgroundImage:
           "radial-gradient(circle at 12% 18%, rgba(255,255,255,0.22) 0 1px, transparent 2px)," +

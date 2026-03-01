@@ -5,12 +5,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../src/lib/supabaseClient";
-import {
-  loadScope,
-  isScopeReady,
-  scopeLabel,
-  type TarotScope,
-} from "../../src/lib/scope";
+import { loadScope, scopeLabel, type TarotScope } from "../../src/lib/scope";
 
 type ReadingRow = {
   id: string;
@@ -25,6 +20,17 @@ type ReadingRow = {
 };
 
 type DeckRow = { key: string; name: string | null };
+
+type ClientProfileRow = {
+  id: string;
+  display_name: string;
+  relationship_type: string | null;
+  memo: string | null;
+  is_active: boolean;
+  updated_at: string;
+};
+
+type ViewTarget = "all" | "self" | "client";
 
 function clsx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
@@ -42,17 +48,24 @@ function formatDt(v: string | null) {
 export default function ReadPage() {
   const router = useRouter();
 
-  // ✅ Hooksは必ず最上段で全部呼ぶ（条件で増減させない）
   const [booting, setBooting] = useState(true);
   const [status, setStatus] = useState("loading...");
   const [userEmail, setUserEmail] = useState<string | null>(null);
 
+  // scopeは「参考表示」用（必須にしない）
   const [scope, setScope] = useState<TarotScope | null>(null);
 
   const [rows, setRows] = useState<ReadingRow[]>([]);
   const [decks, setDecks] = useState<DeckRow[]>([]);
   const [deckFilter, setDeckFilter] = useState<string>("all");
   const [q, setQ] = useState("");
+
+  // 閲覧モード（全て / 自分 / カルテ）
+  const [viewTarget, setViewTarget] = useState<ViewTarget>("all");
+
+  // カルテ一覧 + 選択
+  const [profiles, setProfiles] = useState<ClientProfileRow[]>([]);
+  const [selectedClientId, setSelectedClientId] = useState<string>("");
 
   // ---- auth + scope ----
   useEffect(() => {
@@ -62,8 +75,7 @@ export default function ReadPage() {
       setBooting(true);
       setStatus("loading...");
 
-      const { data: sessionData, error: sessionErr } =
-        await supabase.auth.getSession();
+      const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
       if (cancelled) return;
 
       if (sessionErr) {
@@ -80,15 +92,12 @@ export default function ReadPage() {
 
       setUserEmail(session.user.email ?? null);
 
-      // scope 必須：なければ welcome に戻す（プライバシー）
+      // scopeは「あるなら読む」だけ（必須にしない）
       const sc = loadScope();
-      if (!isScopeReady(sc)) {
-        router.replace("/welcome?reason=select_scope");
-        return;
-      }
-
       setScope(sc);
+
       setBooting(false);
+      setStatus("ok");
     })();
 
     return () => {
@@ -115,34 +124,66 @@ export default function ReadPage() {
     };
   }, []);
 
-  // ---- readings (scope + filters) ----
+  // ---- client profiles (for filter) ----
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const { data, error } = await supabase
+        .from("client_profiles")
+        .select("id, display_name, relationship_type, memo, is_active, updated_at")
+        .order("updated_at", { ascending: false });
+
+      if (cancelled) return;
+
+      if (error) {
+        setProfiles([]);
+        return;
+      }
+
+      const list = (data ?? []) as ClientProfileRow[];
+      setProfiles(list);
+
+      setSelectedClientId((prev) => {
+        if (prev) return prev;
+        const firstActive = list.find((p) => p.is_active);
+        return firstActive?.id ?? "";
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // ---- readings (filters) ----
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       if (booting) return;
-      if (!scope) return;
 
       setStatus("loading...");
 
-      // scopeで完全分離（混ざらない）
       let query = supabase
         .from("readings")
-        .select(
-          "id,title,theme,cards_text,result_text,created_at,mode,target_type,client_profile_id"
-        )
+        .select("id,title,theme,cards_text,result_text,created_at,mode,target_type,client_profile_id")
         .order("created_at", { ascending: false })
         .limit(200);
 
-      if (scope.targetType === "self") {
+      if (viewTarget === "self") {
         query = query.eq("target_type", "self");
-      } else {
+      } else if (viewTarget === "client") {
         query = query.eq("target_type", "client");
-        query = query.eq("client_profile_id", scope.clientProfileId);
+        if (selectedClientId) {
+          query = query.eq("client_profile_id", selectedClientId);
+        } else {
+          setRows([]);
+          setStatus("ok");
+          return;
+        }
       }
 
-      // deck filter は mode に deckKey を入れてる前提（あなたの実装に合わせて）
-      // ※もし deckKey を別カラムで持ってるなら、ここを差し替えてOK
       if (deckFilter !== "all") {
         query = query.ilike("mode", `%${deckFilter}%`);
       }
@@ -164,7 +205,7 @@ export default function ReadPage() {
     return () => {
       cancelled = true;
     };
-  }, [booting, scope, deckFilter]);
+  }, [booting, viewTarget, selectedClientId, deckFilter]);
 
   const filtered = useMemo(() => {
     const keyword = q.trim().toLowerCase();
@@ -172,9 +213,7 @@ export default function ReadPage() {
 
     return rows.filter((r) => {
       const hay =
-        `${r.title ?? ""}\n${r.theme ?? ""}\n${r.cards_text ?? ""}\n${
-          r.result_text ?? ""
-        }\n${r.mode ?? ""}`.toLowerCase();
+        `${r.title ?? ""}\n${r.theme ?? ""}\n${r.cards_text ?? ""}\n${r.result_text ?? ""}\n${r.mode ?? ""}`.toLowerCase();
       return hay.includes(keyword);
     });
   }, [rows, q]);
@@ -187,13 +226,26 @@ export default function ReadPage() {
     }
   }
 
-  // ✅ 早期 return は Hooks の後ならOK（booting中は表示だけ変える）
+  const chip = (on: boolean) =>
+    clsx(
+      "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold",
+      on ? "border-white/18 bg-white/12 text-white" : "border-white/10 bg-white/6 text-white/60"
+    );
+
   return (
-    <main className="min-h-screen bg-[#0B1020] text-white">
-      {/* 背景：loginに寄せた夜空 */}
-      <div className="pointer-events-none fixed inset-0">
+    <main className="min-h-screen">
+      {/* ✅ option白問題：このページだけで潰す（layout触らない） */}
+      <style jsx global>{`
+        select { color-scheme: dark; }
+        select option {
+          background: #0b1020 !important;
+          color: rgba(255,255,255,0.92) !important;
+        }
+      `}</style>
+
+      <div className="relative min-h-screen overflow-hidden bg-[#0B1020] text-white">
         <div
-          className="absolute inset-0"
+          className="pointer-events-none absolute inset-0"
           style={{
             background:
               "radial-gradient(1200px 700px at 18% 22%, rgba(120,140,255,0.18), transparent 60%)," +
@@ -202,138 +254,169 @@ export default function ReadPage() {
           }}
         />
         <Stars />
-      </div>
 
-      {/* sticky header */}
-      <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/60 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 md:px-6">
-          <Link
-            href="/welcome"
-            className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 transition hover:bg-white/5"
-            aria-label="Tarot Studio（Welcomeへ）"
-          >
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/10 text-xs font-semibold text-white/80">
-              TS
-            </span>
-            <span
-              className="text-base font-semibold tracking-tight text-white md:text-lg"
-              style={{
-                fontFamily:
-                  'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
-              }}
-            >
-              Tarot Studio
-            </span>
-          </Link>
-
-          <div className="flex items-center gap-2">
-            <span className="hidden rounded-full border border-white/12 bg-white/8 px-3 py-1 text-xs font-semibold text-white/70 md:inline-flex">
-              {scope ? scopeLabel(scope) : "scope未選択"}
-            </span>
-            <Link
-              href="/new"
-              className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
-            >
-              ＋ 新規鑑定
-            </Link>
-            <button
-              onClick={logout}
-              className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
-            >
-              ログアウト
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="relative mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-10">
-        <header className="mb-4">
-          <h1
-            className="text-2xl font-semibold tracking-tight text-white md:text-3xl"
-            style={{
-              fontFamily:
-                'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
-            }}
-          >
-            History
-          </h1>
-          <p className="mt-2 text-sm text-white/65">
-            保存された鑑定を一覧できます（scopeで完全分離）
-          </p>
-          <p className="mt-1 text-xs text-white/45">
-            {userEmail ? `ログイン中：${userEmail}` : ""}{" "}
-            {status !== "ok" ? ` / ${status}` : ""}
-          </p>
-        </header>
-
-        {/* controls */}
-        <section className="rounded-[26px] border border-white/12 bg-white/6 p-4 shadow-[0_35px_110px_rgba(0,0,0,0.55)] backdrop-blur-2xl md:p-5">
-          <div className="grid gap-3 md:grid-cols-3 md:items-end">
-            <div>
-              <div className="mb-2 text-xs font-semibold text-white/75">
-                検索
-              </div>
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="タイトル / テーマ / 結果 / デッキ など"
-                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white shadow-sm outline-none placeholder:text-white/35 focus:border-white/20"
-              />
-            </div>
-
-            <div>
-              <div className="mb-2 text-xs font-semibold text-white/75">
-                デッキ
-              </div>
-              <select
-                value={deckFilter}
-                onChange={(e) => setDeckFilter(e.target.value)}
-                className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white shadow-sm outline-none focus:border-white/20"
-              >
-                <option value="all">全デッキ</option>
-                {decks.map((d) => (
-                  <option key={d.key} value={d.key}>
-                    {d.name ?? d.key}
-                  </option>
-                ))}
-              </select>
-              <div className="mt-2 text-[11px] text-white/45">
-                ※ deckFilter は mode に deckKey が入ってる想定
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between gap-2">
+        {/* ✅ Header（Welcomeと同型） */}
+        <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/55 backdrop-blur-xl">
+          <div className="mx-auto max-w-6xl px-4 py-3 md:px-6">
+            <div className="flex items-center justify-between gap-3">
               <Link
                 href="/welcome"
-                className="w-full rounded-2xl border border-white/12 bg-white/8 px-4 py-3 text-center text-sm font-semibold text-white/85 hover:bg-white/12"
+                className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 transition hover:bg-white/5"
+                aria-label="Tarot Studio（Welcomeへ）"
               >
-                scopeを切り替える（Welcome）
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/10 text-xs font-semibold text-white/80">
+                  TS
+                </span>
+                <span className="text-base font-semibold tracking-tight text-white md:text-lg">
+                  Tarot Studio
+                </span>
+                <span className="hidden rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-white/80 sm:inline-flex">
+                  招待制 / Invite only
+                </span>
               </Link>
+
+              <div className="flex items-center gap-2">
+                <span className="hidden text-xs text-white/55 md:inline">
+                  {userEmail ? `ログイン中：${userEmail}` : ""}
+                </span>
+                <button
+                  onClick={logout}
+                  className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
+                >
+                  ログアウト
+                </button>
+              </div>
             </div>
           </div>
+        </div>
 
-          <div className="mt-5 border-t border-white/10 pt-5">
-            {booting ? (
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
-                読み込み中…
+        {/* ✅ Footerぶん余白 */}
+        <div className="relative mx-auto max-w-6xl px-4 py-7 pb-28 md:px-6 md:py-10 md:pb-32">
+          <header className="mb-4 rounded-2xl border border-white/10 bg-white/7 px-5 py-4">
+            <div className="text-xs font-semibold tracking-[0.18em] text-white/55">READ</div>
+            <div
+              className="mt-2 text-xl font-semibold text-white"
+              style={{ fontFamily: 'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif' }}
+            >
+              相談履歴
+            </div>
+            <div className="mt-1 text-sm text-white/55">ここで「誰の履歴を見るか」を選べます。</div>
+            <div className="mt-1 text-xs text-white/45">
+              {scope ? `参考 scope：${scopeLabel(scope)}` : ""}
+              {status && status !== "ok" ? ` / ${status}` : ""}
+            </div>
+          </header>
+
+          <section className="rounded-[26px] border border-white/12 bg-white/6 p-4 shadow-[0_35px_110px_rgba(0,0,0,0.55)] backdrop-blur-2xl md:p-5">
+            {/* 上段：誰の履歴を見るか */}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/6 px-4 py-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" className={chip(viewTarget === "all")} onClick={() => setViewTarget("all")}>
+                  すべて
+                </button>
+                <button type="button" className={chip(viewTarget === "self")} onClick={() => setViewTarget("self")}>
+                  自分
+                </button>
+                <button
+                  type="button"
+                  className={chip(viewTarget === "client")}
+                  onClick={() => setViewTarget("client")}
+                  disabled={profiles.length === 0}
+                >
+                  相談者（カルテ）
+                </button>
+
+                {viewTarget === "client" ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-white/55">→</span>
+                    <select
+                      value={selectedClientId}
+                      onChange={(e) => setSelectedClientId(e.target.value)}
+                      className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white shadow-sm outline-none focus:border-white/20"
+                    >
+                      <option value="">（カルテを選択）</option>
+                      {profiles
+                        .filter((p) => p.is_active)
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.display_name}
+                            {p.relationship_type ? ` / ${p.relationship_type}` : ""}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                ) : null}
               </div>
-            ) : filtered.length === 0 ? (
-              <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
-                まだ履歴がありません（このscopeでは0件）
+
+              <Link
+                href="/welcome"
+                className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
+              >
+                ホーム
+              </Link>
+            </div>
+
+            {/* 検索・デッキ */}
+            <div className="grid gap-3 md:grid-cols-3 md:items-end">
+              <div>
+                <div className="mb-2 text-xs font-semibold text-white/75">検索</div>
+                <input
+                  value={q}
+                  onChange={(e) => setQ(e.target.value)}
+                  placeholder="タイトル / テーマ / 結果 / デッキ など"
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white shadow-sm outline-none placeholder:text-white/35 focus:border-white/20"
+                />
               </div>
-            ) : (
-              <div className="space-y-3">
-                {filtered.map((r) => (
-                  <article
-                    key={r.id}
-                    className="rounded-2xl border border-white/10 bg-white/5 p-4"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="text-xs text-white/55">
-                        {formatDt(r.created_at)}{" "}
-                        {r.mode ? ` / ${r.mode}` : ""}
-                      </div>
-                      <div className="flex items-center gap-2">
+
+              <div>
+                <div className="mb-2 text-xs font-semibold text-white/75">デッキ</div>
+                <select
+                  value={deckFilter}
+                  onChange={(e) => setDeckFilter(e.target.value)}
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white shadow-sm outline-none focus:border-white/20"
+                >
+                  <option value="all">全デッキ</option>
+                  {decks.map((d) => (
+                    <option key={d.key} value={d.key}>
+                      {d.name ?? d.key}
+                    </option>
+                  ))}
+                </select>
+                <div className="mt-2 text-[11px] text-white/45">※ deckFilter は mode に deckKey が入ってる想定</div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <Link
+                  href="/new"
+                  className="w-full rounded-2xl border border-white/12 bg-white/8 px-4 py-3 text-center text-sm font-semibold text-white/85 hover:bg-white/12"
+                >
+                  ＋ 新規鑑定
+                </Link>
+              </div>
+            </div>
+
+            {/* list */}
+            <div className="mt-5 border-t border-white/10 pt-5">
+              {booting ? (
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
+                  読み込み中…
+                </div>
+              ) : viewTarget === "client" && !selectedClientId ? (
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
+                  カルテを選ぶと、その人の履歴だけに絞れます。
+                </div>
+              ) : filtered.length === 0 ? (
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
+                  該当する履歴がありません。
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {filtered.map((r) => (
+                    <article key={r.id} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-xs text-white/55">
+                          {formatDt(r.created_at)} {r.mode ? ` / ${r.mode}` : ""} {r.target_type ? ` / ${r.target_type}` : ""}
+                        </div>
                         <Link
                           href={`/read/${r.id}`}
                           className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
@@ -341,35 +424,74 @@ export default function ReadPage() {
                           開く
                         </Link>
                       </div>
-                    </div>
 
-                    <div
-                      className="mt-2 text-lg font-semibold text-white"
-                      style={{
-                        fontFamily:
-                          'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
-                      }}
-                    >
-                      {r.title ?? "（無題）"}
-                    </div>
+                      <div
+                        className="mt-2 text-lg font-semibold text-white"
+                        style={{ fontFamily: 'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif' }}
+                      >
+                        {r.title ?? "（無題）"}
+                      </div>
 
-                    {r.result_text ? (
-                      <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm leading-7 text-white/70">
-                        {r.result_text}
-                      </p>
-                    ) : (
-                      <p className="mt-2 text-sm text-white/45">
-                        （結果テキストなし）
-                      </p>
-                    )}
-                  </article>
-                ))}
+                      {r.result_text ? (
+                        <p className="mt-2 line-clamp-3 whitespace-pre-wrap text-sm leading-7 text-white/70">
+                          {r.result_text}
+                        </p>
+                      ) : (
+                        <p className="mt-2 text-sm text-white/45">（結果テキストなし）</p>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+
+        {/* ✅ Footer（Welcomeと同型：下固定CTA） */}
+        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#0B1020]/70 backdrop-blur-xl">
+          <div className="mx-auto max-w-6xl px-4 py-3 md:px-6">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div className="flex flex-wrap items-center gap-2 text-xs text-white/70">
+                <span className={chip(true)}>
+                  {viewTarget === "all" ? "すべて" : viewTarget === "self" ? "自分" : "相談者"}
+                </span>
+                <span className={chip(viewTarget !== "client" || !!selectedClientId)}>
+                  {viewTarget === "client"
+                    ? selectedClientId
+                      ? "カルテ選択済み"
+                      : "カルテ未選択"
+                    : "フィルタOK"}
+                </span>
               </div>
-            )}
-          </div>
-        </section>
 
-        <div className="h-10" />
+              <div className="grid grid-cols-2 gap-2 md:flex md:items-center">
+                <Link
+                  href="/new"
+                  className="rounded-2xl border border-white/18 bg-white/14 px-4 py-3 text-center text-sm font-semibold text-white hover:bg-white/18"
+                >
+                  新規鑑定
+                </Link>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <Link
+                    href="/chat"
+                    className="rounded-2xl border border-white/12 bg-white/8 px-3 py-3 text-center text-xs font-semibold text-white/85 hover:bg-white/12"
+                  >
+                    つづき相談
+                  </Link>
+
+                  <Link
+                    href="/welcome"
+                    className="rounded-2xl border border-white/12 bg-white/8 px-3 py-3 text-center text-xs font-semibold text-white/85 hover:bg-white/12"
+                  >
+                    ホーム
+                  </Link>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </main>
   );
@@ -378,7 +500,7 @@ export default function ReadPage() {
 function Stars() {
   return (
     <div
-      className="absolute inset-0 opacity-70"
+      className="pointer-events-none absolute inset-0 opacity-70"
       style={{
         backgroundImage:
           "radial-gradient(circle at 12% 18%, rgba(255,255,255,0.22) 0 1px, transparent 2px)," +

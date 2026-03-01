@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { getOrCreateDailyCards as getDailyCards } from "@/lib/dailyCards";
-import AuditGeoFull from "./AuditGeoFull"; // ✅ これを使う
+import AuditGeoFull from "./AuditGeoFull";
 import {
   loadScope,
   saveScope,
@@ -21,10 +21,18 @@ type ClientProfileRow = {
   display_name: string;
   relationship_type: string | null;
   memo: string | null;
+  birth_date: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;
   last_reading_at: string | null;
+};
+
+type UserProfileRow = {
+  user_id: string;
+  display_name: string | null;
+  birth_date: string | null;
+  updated_at: string | null;
 };
 
 type WeatherView = {
@@ -34,6 +42,8 @@ type WeatherView = {
   todayMinC: number | null;
   weatherLabel: string | null;
 };
+
+type DrawMode = "self" | "ai";
 
 function clsx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
@@ -57,6 +67,19 @@ function weatherCodeLabel(code: number | null | undefined): string | null {
   if (code === 95) return "雷雨";
   if (code === 96 || code === 99) return "雷雨（ひょう）";
   return "天気";
+}
+
+function weatherEmoji(label: string | null | undefined) {
+  const s = (label ?? "").toLowerCase();
+  if (!s) return "🌤️";
+  if (s.includes("雷")) return "⛈️";
+  if (s.includes("雪")) return "❄️";
+  if (s.includes("霧")) return "🌫️";
+  if (s.includes("雨")) return "🌧️";
+  if (s.includes("快晴")) return "☀️";
+  if (s.includes("晴")) return "🌤️";
+  if (s.includes("曇")) return "☁️";
+  return "🌤️";
 }
 
 async function fetchWeather(lat: number, lon: number): Promise<WeatherView> {
@@ -104,9 +127,8 @@ async function fetchWeather(lat: number, lon: number): Promise<WeatherView> {
   };
 }
 
-// ---- Moon age (simple) ----
+// ---- Moon ----
 function moonAgeDaysJST(now = new Date()): number {
-  // 2024-01-11 20:57 JST (= UTC 11:57)
   const base = new Date("2024-01-11T11:57:00.000Z");
   const synodic = 29.530588;
   const diffDays = (now.getTime() - base.getTime()) / 86400000;
@@ -136,8 +158,14 @@ function moonEmoji(age: number): string {
   if (t < 0.875) return "🌗";
   return "🌘";
 }
+function moonPct(age: number) {
+  const syn = 29.530588;
+  const t = age / syn;
+  if (t <= 0.5) return Math.round((t / 0.5) * 100);
+  return Math.round((1 - (t - 0.5) / 0.5) * 100);
+}
 
-// ---- Card image helper ----
+// ---- Cards ----
 function slugifyCardName(name: string): string {
   return name
     .toLowerCase()
@@ -148,61 +176,33 @@ function slugifyCardName(name: string): string {
 function cardImageSrc(name: string): string {
   return `/cards/rws/${slugifyCardName(name)}.jpg`;
 }
-
-// ---- Mini fortune (simple, fast) ----
-function dailyMiniFortune(names: string[]): string {
+function dailyThemeText(names: string[]): string {
   const cards = (names ?? []).slice(0, 3).map((x) => (x ?? "").toLowerCase());
+  const s = cards.join(" / ");
+  if (s.includes("tower")) return "今日は「揺れ」を通して真実が出る日。";
+  if (s.includes("moon")) return "今日は「不安の増幅」に注意。事実で足場を作る日。";
+  if (s.includes("sun")) return "今日は「回復」と「光」。小さく前に進める日。";
+  if (s.includes("death")) return "今日は「切り替え」。終わらせて次へ進む日。";
+  if (s.includes("wheel")) return "今日は「流れが動く」。固執せず波に乗る日。";
+  if (s.includes("swords")) return "今日は「言葉と頭」。整理すれば強い日。";
+  if (s.includes("cups")) return "今日は「気持ち」。やさしく整える日。";
+  if (s.includes("wands")) return "今日は「火」。小さく着火する日。";
+  if (s.includes("pentacles")) return "今日は「現実」。足元を固める日。";
+  return "今日は「空気が動く」。静かに整える日。";
+}
 
-  // ざっくりテーマ辞書（必要なら増やせる）
-  const MAJOR_THEME: Array<[RegExp, string]> = [
-    [/the tower|tower/, "予定変更や衝撃に備える日。崩れる前に整えるのが吉。"],
-    [/death/, "切り替えの日。終わらせて、次に移すほど軽くなる。"],
-    [/the star|star/, "回復と希望。焦らず、良い方に寄せていける。"],
-    [/the moon|moon/, "不安が膨らみやすい日。事実と想像を分けると落ち着く。"],
-    [/the sun|sun/, "明るさが戻る日。小さくても前に進める。"],
-    [/judgement|judgment/, "再スタート。過去のやり直しより、今の選択を。"],
-    [/the world|world/, "一区切り。仕上げ・完了に強い流れ。"],
-    [/wheel of fortune|wheel/, "流れが動く日。固執せず、波に合わせると良い。"],
-    [/the lovers|lovers/, "選択と向き合う日。曖昧を減らすほど楽になる。"],
-    [/the hermit|hermit/, "内省の日。静かな時間が回復になる。"],
-    [/temperance/, "バランス調整。急がず整えるほどうまくいく。"],
-  ];
-
-  const SUIT_THEME: Array<[RegExp, string]> = [
-    [/swords/, "言葉と考えがテーマ。結論を急がず、整理してから。"],
-    [/cups/, "気持ちがテーマ。無理に強くならず、やさしく整える。"],
-    [/wands/, "勢いがテーマ。小さく着火して、動き出すと伸びる。"],
-    [/pentacles/, "現実とお金がテーマ。足元を固めるほど安心する。"],
-  ];
-
-  // まず大アルカナ優先で当てる
-  for (const c of cards) {
-    for (const [re, msg] of MAJOR_THEME) {
-      if (re.test(c)) return msg;
-    }
+function loadDrawMode(): DrawMode | null {
+  try {
+    const v = localStorage.getItem("ts_draw_mode");
+    return v === "self" || v === "ai" ? v : null;
+  } catch {
+    return null;
   }
-
-  // 次にスートの雰囲気
-  let hits = 0;
-  const suitCount = { swords: 0, cups: 0, wands: 0, pentacles: 0 };
-  for (const c of cards) {
-    if (c.includes("swords")) (suitCount.swords++, hits++);
-    else if (c.includes("cups")) (suitCount.cups++, hits++);
-    else if (c.includes("wands")) (suitCount.wands++, hits++);
-    else if (c.includes("pentacles")) (suitCount.pentacles++, hits++);
-  }
-
-  const topSuit = (Object.keys(suitCount) as Array<keyof typeof suitCount>).sort(
-    (a, b) => suitCount[b] - suitCount[a]
-  )[0];
-
-  const suitRe = new RegExp(topSuit);
-  for (const [re, msg] of SUIT_THEME) {
-    if (re.source === suitRe.source) return msg;
-  }
-
-  // 最後の保険
-  return "今日は「整える」がテーマ。焦らず、一つずつ。";
+}
+function saveDrawMode(m: DrawMode) {
+  try {
+    localStorage.setItem("ts_draw_mode", m);
+  } catch {}
 }
 
 export default function WelcomePage() {
@@ -211,15 +211,11 @@ export default function WelcomePage() {
   const [checking, setChecking] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
-
-  // ✅ 追加：AuditGeoFullに渡すための userId
   const [userId, setUserId] = useState<string | null>(null);
 
   const [scope, setScope] = useState<TarotScope | null>(null);
   const [profiles, setProfiles] = useState<ClientProfileRow[]>([]);
   const [q, setQ] = useState("");
-
-  const [nextPath, setNextPath] = useState<string | null>(null);
 
   const [dailyCards, setDailyCards] = useState<string[] | null>(null);
 
@@ -227,30 +223,34 @@ export default function WelcomePage() {
   const [weatherErr, setWeatherErr] = useState<string | null>(null);
 
   const [moonAge, setMoonAge] = useState<number>(() => moonAgeDaysJST(new Date()));
+  const mp = moonPct(moonAge);
 
-  const [newName, setNewName] = useState("");
-  const [newRel, setNewRel] = useState("");
-  const [newMemo, setNewMemo] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [drawMode, setDrawMode] = useState<DrawMode | null>(null);
+
+  // UI: 相談者カルテ一覧は必要なときだけ開く
+  const [openProfiles, setOpenProfiles] = useState(false);
+
+  // ✅ 生年月日（自分 / 相談者）
+  const [selfBirth, setSelfBirth] = useState<string>("");
+  const [selfBirthSaving, setSelfBirthSaving] = useState(false);
+  const [selfBirthMsg, setSelfBirthMsg] = useState<string | null>(null);
+
+  const [clientBirth, setClientBirth] = useState<string>("");
+  const [clientBirthSaving, setClientBirthSaving] = useState(false);
+  const [clientBirthMsg, setClientBirthMsg] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setMoonAge(moonAgeDaysJST(new Date())), 60_000);
     return () => clearInterval(t);
   }, []);
 
+  // auth + allowlist + profiles + daily + user_profile
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       setChecking(true);
       setErr(null);
-
-      try {
-        const qs = new URLSearchParams(window.location.search);
-        setNextPath(qs.get("next"));
-      } catch {
-        setNextPath(null);
-      }
 
       const { data: sessionData, error: sessionErr } = await supabase.auth.getSession();
       if (cancelled) return;
@@ -267,19 +267,11 @@ export default function WelcomePage() {
         return;
       }
 
-      // ✅ 追加：ここで userId を確実にセット
-      setUserId(session.user.id);
+      const uid = session.user.id;
+      setUserId(uid);
 
       const email = session.user.email ?? null;
       setUserEmail(email);
-
-      try {
-        const uid = session.user.id;
-        const daily = getDailyCards(uid);
-        setDailyCards(daily.cards);
-      } catch {
-        setDailyCards(null);
-      }
 
       if (email) {
         const { data: allowedRows, error: allowErr } = await supabase
@@ -296,20 +288,41 @@ export default function WelcomePage() {
         }
       }
 
+      // scope
       const s = loadScope();
       setScope(s);
 
+      // drawMode
+      const dm = loadDrawMode();
+      setDrawMode(dm);
+
+      // daily cards
+      try {
+        const daily = getDailyCards(uid);
+        setDailyCards(daily.cards);
+      } catch {
+        setDailyCards(null);
+      }
+
+      // profiles
       const { data: rows, error: profErr } = await supabase
         .from("client_profiles")
-        .select(
-          "id, display_name, relationship_type, memo, is_active, created_at, updated_at, last_reading_at"
-        )
+        .select("id, display_name, relationship_type, memo, birth_date, is_active, created_at, updated_at, last_reading_at")
         .order("updated_at", { ascending: false });
 
-      if (profErr) {
-        setErr(`client_profiles 読み込みエラー: ${profErr.message}`);
-      } else {
-        setProfiles((rows ?? []) as ClientProfileRow[]);
+      if (profErr) setErr(`client_profiles 読み込みエラー: ${profErr.message}`);
+      else setProfiles((rows ?? []) as ClientProfileRow[]);
+
+      // ✅ user_profile（自分の生年月日）
+      const { data: up, error: upErr } = await supabase
+        .from("user_profile")
+        .select("user_id, display_name, birth_date, updated_at")
+        .eq("user_id", uid)
+        .maybeSingle();
+
+      if (!upErr) {
+        const row = (up ?? null) as UserProfileRow | null;
+        setSelfBirth(row?.birth_date ?? "");
       }
 
       setChecking(false);
@@ -320,7 +333,7 @@ export default function WelcomePage() {
     };
   }, [router]);
 
-  // 天気（現在地 or 東京）
+  // weather
   useEffect(() => {
     let cancelled = false;
 
@@ -337,7 +350,7 @@ export default function WelcomePage() {
             });
           });
 
-        let lat = 35.681236; // Tokyo fallback
+        let lat = 35.681236;
         let lon = 139.767125;
 
         try {
@@ -352,7 +365,6 @@ export default function WelcomePage() {
         if (Math.abs(lat - 35.681236) < 0.01 && Math.abs(lon - 139.767125) < 0.01) {
           w.locationLabel = "東京";
         }
-
         setWeather(w);
       } catch (e: any) {
         if (cancelled) return;
@@ -366,6 +378,21 @@ export default function WelcomePage() {
     };
   }, []);
 
+  // ✅ scopeがclientになったら、その相談者のbirth_dateを入力欄へ反映
+  useEffect(() => {
+    if (!scope) return;
+    if (scope.targetType !== "client") {
+      setClientBirth("");
+      setClientBirthMsg(null);
+      return;
+    }
+    const pid = scope.clientProfileId;
+    if (!pid) return;
+    const p = profiles.find((x) => x.id === pid);
+    setClientBirth(p?.birth_date ?? "");
+    setClientBirthMsg(null);
+  }, [scope, profiles]);
+
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
     if (!t) return profiles;
@@ -377,7 +404,13 @@ export default function WelcomePage() {
     });
   }, [profiles, q]);
 
-  const ready = isScopeReady(scope);
+  const readyScope = isScopeReady(scope);
+  const ready = !!drawMode && readyScope;
+
+  function pickDrawMode(m: DrawMode) {
+    saveDrawMode(m);
+    setDrawMode(m);
+  }
 
   function chooseSelf() {
     const next: TarotScope = {
@@ -388,6 +421,9 @@ export default function WelcomePage() {
     };
     saveScope(next);
     setScope(next);
+    setOpenProfiles(false);
+    setClientBirth("");
+    setClientBirthMsg(null);
   }
 
   function chooseClient(p: ClientProfileRow) {
@@ -399,11 +435,21 @@ export default function WelcomePage() {
     };
     saveScope(next);
     setScope(next);
+    setOpenProfiles(false);
+    setClientBirth(p.birth_date ?? "");
+    setClientBirthMsg(null);
   }
 
-  function resetScope() {
+  function resetAll() {
     clearScope();
     setScope(null);
+    try {
+      localStorage.removeItem("ts_draw_mode");
+    } catch {}
+    setDrawMode(null);
+    setOpenProfiles(false);
+    setSelfBirthMsg(null);
+    setClientBirthMsg(null);
   }
 
   async function logout() {
@@ -414,136 +460,136 @@ export default function WelcomePage() {
     }
   }
 
-  async function createClient() {
-    const name = newName.trim();
-    if (!name) return;
-
-    setCreating(true);
-    setErr(null);
-
+  async function saveSelfBirthDate() {
+    if (!userId) return;
+    setSelfBirthSaving(true);
+    setSelfBirthMsg(null);
     try {
-      const session = (await supabase.auth.getSession()).data.session;
-      const uid = session?.user?.id;
-      if (!uid) {
-        router.replace("/login?reason=not_logged_in");
-        return;
-      }
-
-      const clientCode = `C-${new Date()
-        .toISOString()
-        .replace(/[-:TZ.]/g, "")
-        .slice(0, 14)}-${Math.floor(Math.random() * 900 + 100)}`;
-
-      const { data, error } = await supabase
-        .from("client_profiles")
-        .insert({
-          owner_user_id: uid,
-          client_code: clientCode,
-          display_name: name,
-          relationship_type: newRel.trim() || null,
-          memo: newMemo.trim() || null,
-          is_active: true,
-        })
-        .select(
-          "id, display_name, relationship_type, memo, is_active, created_at, updated_at, last_reading_at"
-        )
-        .limit(1)
-        .single();
+      const birth = selfBirth ? selfBirth : null;
+      const { error } = await supabase
+        .from("user_profile")
+        .upsert(
+          {
+            user_id: userId,
+            birth_date: birth,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "user_id" }
+        );
 
       if (error) throw error;
-
-      const row = data as ClientProfileRow;
-      setProfiles((prev) => [row, ...prev]);
-      setNewName("");
-      setNewRel("");
-      setNewMemo("");
-
-      chooseClient(row);
+      setSelfBirthMsg("保存しました");
     } catch (e: any) {
-      setErr(e?.message ?? "作成に失敗しました");
+      setSelfBirthMsg(e?.message ?? "保存に失敗しました");
     } finally {
-      setCreating(false);
+      setSelfBirthSaving(false);
     }
   }
 
-  const primaryBtn = (enabled: boolean) =>
+  async function saveClientBirthDate() {
+    if (!scope || scope.targetType !== "client" || !scope.clientProfileId) return;
+    setClientBirthSaving(true);
+    setClientBirthMsg(null);
+    try {
+      const birth = clientBirth ? clientBirth : null;
+      const { error } = await supabase
+        .from("client_profiles")
+        .update({ birth_date: birth })
+        .eq("id", scope.clientProfileId);
+
+      if (error) throw error;
+
+      // ローカルのprofilesも更新（見た目の反映用）
+      setProfiles((prev) =>
+        prev.map((p) =>
+          p.id === scope.clientProfileId ? { ...p, birth_date: birth } : p
+        )
+      );
+
+      setClientBirthMsg("保存しました");
+    } catch (e: any) {
+      setClientBirthMsg(e?.message ?? "保存に失敗しました");
+    } finally {
+      setClientBirthSaving(false);
+    }
+  }
+
+  const chip = (on: boolean) =>
     clsx(
-      "w-full rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm transition !text-white",
-      enabled
-        ? "border-white/15 bg-white/10 hover:bg-white/14 !text-white"
-        : "cursor-not-allowed border-white/8 bg-white/5 !text-white/60"
+      "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold",
+      on ? "border-white/18 bg-white/12 text-white" : "border-white/10 bg-white/6 text-white/60"
     );
 
-  const WeatherChip = () => (
-    <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80">
-      <div className="flex items-center gap-2">
-        <span className="text-white/55">天気</span>
-        {weatherErr ? (
-          <span className="text-white/55">–</span>
-        ) : !weather ? (
-          <span className="text-white/55">取得中…</span>
-        ) : (
-          <span className="text-white/85">
-            {weather.locationLabel} / {weather.weatherLabel ?? "—"}
-            {weather.currentTempC != null ? ` / ${Math.round(weather.currentTempC)}℃` : ""}
-          </span>
-        )}
-      </div>
+  const choiceBtn = (active?: boolean) =>
+    clsx(
+      "w-full rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm transition",
+      active
+        ? "border-white/25 bg-white/16 text-white"
+        : "border-white/12 bg-white/8 text-white/85 hover:bg-white/12"
+    );
 
-      <div className="flex items-center gap-2 text-white/70">
-        <span className="text-white/40">月</span>
-        <span className="text-white/75">
-          {moonEmoji(moonAge)} {moonPhaseLabel(moonAge)} / {moonAge.toFixed(1)}日
-        </span>
+  // 固定CTA
+  const primaryHref = drawMode === "ai" ? "/quick" : "/new";
+  const primaryLabel = drawMode === "ai" ? "AIが引いて占う" : "鑑定する";
+
+  // 左の天気表示
+  const WeatherLine = () => {
+    if (weatherErr) return <div className="text-sm text-white/60">天気取得失敗</div>;
+    if (!weather) return <div className="text-sm text-white/60">天気取得中…</div>;
+    return (
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className="text-2xl">{weatherEmoji(weather.weatherLabel)}</div>
+          <div>
+            <div className="text-sm font-semibold text-white/90">
+              {weather.locationLabel} / {weather.weatherLabel ?? "—"}
+            </div>
+            <div className="text-xs text-white/60">
+              いま {weather.currentTempC != null ? `${Math.round(weather.currentTempC)}℃` : "—"} ／
+              最高 {weather.todayMaxC != null ? `${Math.round(weather.todayMaxC)}℃` : "—"} ／
+              最低 {weather.todayMinC != null ? `${Math.round(weather.todayMinC)}℃` : "—"}
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <main className="min-h-screen">
-      {/* ✅ 追加：これが無かったのが原因。Welcomeに実際に置く */}
       <AuditGeoFull userId={userId} />
 
-      <div className="relative min-h-screen overflow-hidden bg-[#0B1020]">
+      <div className="relative min-h-screen overflow-hidden bg-[#0B1020] text-white">
         <div
           className="pointer-events-none absolute inset-0"
           style={{
             background:
               "radial-gradient(1200px 700px at 18% 22%, rgba(120,140,255,0.18), transparent 60%)," +
               "radial-gradient(900px 520px at 82% 30%, rgba(255,255,255,0.06), transparent 62%)," +
-              "radial-gradient(1100px 700px at 50% 100%, rgba(0,0,0,0.55), transparent 60%)," +
               "linear-gradient(180deg, rgba(5,8,18,0.86) 0%, rgba(10,15,30,0.92) 35%, rgba(3,5,12,0.96) 100%)",
           }}
         />
         <Stars />
 
-        {/* sticky header */}
+        {/* header */}
         <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/55 backdrop-blur-xl">
           <div className="mx-auto max-w-6xl px-4 py-3 md:px-6">
             <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <Link
-                  href="/welcome"
-                  className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 transition hover:bg-white/5"
-                  aria-label="Tarot Studio（Welcomeへ）"
-                >
-                  <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/10 text-xs font-semibold text-white/80">
-                    TS
-                  </span>
-                  <span
-                    className="text-base font-semibold tracking-tight text-white md:text-lg"
-                    style={{
-                      fontFamily:
-                        'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
-                    }}
-                  >
-                    Tarot Studio
-                  </span>
-                  <span className="hidden rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-white/80 sm:inline-flex">
-                    招待制 / Invite only
-                  </span>
-                </Link>
-              </div>
+              <Link
+                href="/welcome"
+                className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 transition hover:bg-white/5"
+                aria-label="Tarot Studio（Welcomeへ）"
+              >
+                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/10 text-xs font-semibold text-white/80">
+                  TS
+                </span>
+                <span className="text-base font-semibold tracking-tight text-white md:text-lg">
+                  Tarot Studio
+                </span>
+                <span className="hidden rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-white/80 sm:inline-flex">
+                  招待制 / Invite only
+                </span>
+              </Link>
 
               <div className="flex items-center gap-2">
                 <span className="hidden text-xs text-white/55 md:inline">
@@ -551,7 +597,7 @@ export default function WelcomePage() {
                 </span>
                 <button
                   onClick={logout}
-                  className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold !text-white/85 hover:bg-white/12"
+                  className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
                 >
                   ログアウト
                 </button>
@@ -560,43 +606,21 @@ export default function WelcomePage() {
           </div>
         </div>
 
-        <div className="relative mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-12">
-          {/* HERO：カード主役（中央） */}
-          <header className="mb-6 md:mb-10">
-            <div className="mx-auto max-w-[760px]">
-              {/* 見出し（小さめ） */}
-              <div className="mb-4 text-center">
-                <h1
-                  className="text-2xl tracking-tight text-white md:text-3xl"
-                  style={{
-                    fontFamily:
-                      'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
-                    textShadow: "0 10px 40px rgba(0,0,0,0.55)",
-                  }}
-                >
-                  Welcome
-                </h1>
-                <p className="mt-2 text-sm leading-7 text-white/70">
-                  ここでだけ、鑑定の“入れ物”を選びます。以降のページは同じ入れ物を使い、混ざりません。
-                </p>
-              </div>
+        {/* 下固定CTAのぶん余白 */}
+        <div className="relative mx-auto max-w-6xl px-4 py-7 pb-28 md:px-6 md:py-10 md:pb-32">
+          {err ? (
+            <div className="mb-4 rounded-2xl border border-rose-300/20 bg-rose-500/10 px-5 py-4 text-sm text-rose-100">
+              {err}
+            </div>
+          ) : null}
 
-              {/* 中央：今日の3枚（主役）＋天気を同枠へ */}
-              <div className="rounded-[30px] border border-white/12 bg-white/6 p-4 shadow-[0_40px_140px_rgba(0,0,0,0.60)] backdrop-blur-2xl">
-                <div className="rounded-[26px] border border-white/10 bg-white/7 p-4">
-                  <div className="flex items-end justify-between gap-3">
-                    <div>
-                      <div className="text-xs font-semibold tracking-[0.18em] text-white/60">
-                        TODAY
-                      </div>
-                      <div className="mt-1 text-base font-semibold text-white/90">今日の3枚</div>
-                    </div>
-                  </div>
-
-                  {/* ✅ 天気＆月齢：同じ枠の中 */}
-                  <div className="mt-3">
-                    <WeatherChip />
-                  </div>
+          <div className="grid gap-4 md:grid-cols-[420px_1fr] md:gap-6">
+            {/* LEFT */}
+            <aside className="md:sticky md:top-[84px] self-start">
+              <div className="rounded-[26px] border border-white/12 bg-white/6 p-4 shadow-[0_30px_110px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
+                <div className="rounded-[22px] border border-white/10 bg-white/7 p-4">
+                  <div className="text-xs font-semibold tracking-[0.18em] text-white/60">TODAY</div>
+                  <div className="mt-1 text-base font-semibold text-white/90">今日の3枚</div>
 
                   {!dailyCards ? (
                     <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm text-white/65">
@@ -604,274 +628,336 @@ export default function WelcomePage() {
                     </div>
                   ) : (
                     <>
-                      {/* カード：大きめ＆全体表示（contain） */}
                       <div className="mt-4 grid grid-cols-3 gap-3">
                         {dailyCards.slice(0, 3).map((name, i) => (
-                          <div
-                            key={i}
-                            className="rounded-2xl border border-white/10 bg-black/20 p-3"
-                          >
-                            <div className="flex items-center justify-center rounded-xl border border-white/10 bg-white/5 py-3">
+                          <div key={i} className="rounded-2xl border border-white/10 bg-black/20 p-2">
+                            <div className="flex items-center justify-center rounded-xl border border-white/10 bg-white/5 py-2">
                               <img
                                 src={cardImageSrc(name)}
                                 alt={name}
-                                className="h-[132px] w-[96px] object-contain"
+                                className="h-[96px] w-[70px] object-contain"
                                 onError={(e) => {
                                   (e.currentTarget as HTMLImageElement).style.display = "none";
                                 }}
                               />
                             </div>
-                            <div className="mt-2 text-xs text-white/75">
-                              {i + 1}: {name}
-                            </div>
+                            <div className="mt-2 text-[10px] text-white/70 line-clamp-1">{name}</div>
                           </div>
                         ))}
                       </div>
 
-                      {/* ✅ 簡単な占い一文 */}
                       <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-6 text-white/80">
-                        {dailyMiniFortune(dailyCards)}
-                      </div>
-
-                      <div className="mt-3 text-[11px] text-white/45">
-                        ※画像は /public/cards/rws/ に配置すると表示されます
+                        {dailyThemeText(dailyCards)}
                       </div>
                     </>
                   )}
-                </div>
-              </div>
-            </div>
-          </header>
 
-          {/* エラー */}
-          {err ? (
-            <div className="mb-4 rounded-2xl border border-rose-300/20 bg-rose-500/10 px-5 py-4 text-sm text-rose-100">
-              {err}
-            </div>
-          ) : null}
-
-          {/* メイン */}
-          <section className="rounded-[30px] border border-white/12 bg-white/6 p-3 shadow-[0_40px_120px_rgba(0,0,0,0.55)] backdrop-blur-2xl sm:p-4 md:p-6">
-            <div className="grid gap-4 md:grid-cols-2 md:gap-6">
-              {/* 左：スコープ選択 */}
-              <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm md:p-6">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-xs font-semibold tracking-[0.18em] text-white/60">
-                      SCOPE
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                    <div className="text-xs font-semibold tracking-[0.18em] text-white/55">WEATHER</div>
+                    <div className="mt-2">
+                      <WeatherLine />
                     </div>
-                    <div className="mt-2 text-lg font-semibold text-white">
-                      今の選択：{scopeLabel(scope)}
-                    </div>
-                    <div className="mt-1 text-sm text-white/55">※切り替えはWelcomeだけ</div>
                   </div>
 
-                  <button
-                    onClick={resetScope}
-                    className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold !text-white/85 hover:bg-white/12"
-                    type="button"
-                  >
-                    選択を消す
-                  </button>
-                </div>
-
-                <div className="grid gap-3">
-                  <button onClick={chooseSelf} className={primaryBtn(true)} type="button">
-                    自分をみる（セルフ鑑定）
-                  </button>
-
-                  <Link href="/maintain" className={primaryBtn(true)}>
-                    カルテ編集（Maintain）
-                  </Link>
-
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-                    <div className="text-sm font-semibold text-white/85">誰かをみる（カルテ）</div>
-                    <div className="mt-1 text-sm leading-6 text-white/60">
-                      一人ずつ完全に分けて記録。混ざりません。
-                    </div>
-
-                    <div className="mt-3">
-                      <input
-                        value={q}
-                        onChange={(e) => setQ(e.target.value)}
-                        placeholder="検索（名前 / 関係 / メモ）"
-                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm !text-white shadow-sm outline-none placeholder:!text-white/35 focus:border-white/20"
-                      />
-                    </div>
-
-                    <div className="mt-3 max-h-[280px] overflow-auto rounded-2xl border border-white/10">
-                      {checking ? (
-                        <div className="px-4 py-4 text-sm text-white/55">読み込み中…</div>
-                      ) : filtered.length === 0 ? (
-                        <div className="px-4 py-4 text-sm text-white/55">
-                          まだカルテがありません。下で新規登録できます。
-                        </div>
-                      ) : (
-                        <ul className="divide-y divide-white/10">
-                          {filtered.map((p) => {
-                            const active =
-                              scope?.targetType === "client" && scope.clientProfileId === p.id;
-                            return (
-                              <li key={p.id} className="p-3">
-                                <button
-                                  type="button"
-                                  onClick={() => chooseClient(p)}
-                                  className={clsx(
-                                    "w-full rounded-2xl border px-4 py-3 text-left transition !text-white",
-                                    active
-                                      ? "border-white/18 bg-white/12"
-                                      : "border-white/10 bg-white/6 hover:bg-white/10"
-                                  )}
-                                >
-                                  <div className="flex items-center justify-between gap-3">
-                                    <div className="text-sm font-semibold text-white/90">
-                                      {p.display_name}
-                                    </div>
-                                    <span className="text-xs text-white/50">
-                                      {p.relationship_type ?? ""}
-                                    </span>
-                                  </div>
-                                  {p.memo ? (
-                                    <div className="mt-2 line-clamp-2 text-sm text-white/60">
-                                      {p.memo}
-                                    </div>
-                                  ) : null}
-                                </button>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      )}
-                    </div>
-
-                    <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
-                      <div className="text-sm font-semibold text-white/85">新規登録（カルテ）</div>
-
-                      <div className="mt-3 grid gap-3">
-                        <input
-                          value={newName}
-                          onChange={(e) => setNewName(e.target.value)}
-                          placeholder="表示名（例：Aさん）"
-                          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm !text-white shadow-sm outline-none placeholder:!text-white/35 focus:border-white/20"
-                        />
-                        <input
-                          value={newRel}
-                          onChange={(e) => setNewRel(e.target.value)}
-                          placeholder="関係（任意：恋人/家族/同僚など）"
-                          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm !text-white shadow-sm outline-none placeholder:!text-white/35 focus:border-white/20"
-                        />
-                        <textarea
-                          value={newMemo}
-                          onChange={(e) => setNewMemo(e.target.value)}
-                          rows={3}
-                          placeholder="事情メモ（任意：あとから追記して育てる）"
-                          className="w-full resize-none rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm !text-white shadow-sm outline-none placeholder:!text-white/35 focus:border-white/20"
-                        />
-
-                        <button
-                          type="button"
-                          onClick={createClient}
-                          disabled={creating || !newName.trim()}
-                          className={primaryBtn(!creating && !!newName.trim())}
-                        >
-                          {creating ? "作成中…" : "カルテを作って選択する"}
-                        </button>
-
-                        <div className="text-xs text-white/45">
-                          ※作成したら自動で選択状態になります（確定ボタン不要）
+                  <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
+                    <div className="text-xs font-semibold tracking-[0.18em] text-white/55">MOON</div>
+                    <div className="mt-2 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <div className="text-3xl">{moonEmoji(moonAge)}</div>
+                        <div>
+                          <div className="text-sm font-semibold text-white/90">{moonPhaseLabel(moonAge)}</div>
+                          <div className="text-xs text-white/60">
+                            月齢 {moonAge.toFixed(1)}日 ／ 満ち具合 {mp}%
+                          </div>
                         </div>
                       </div>
+                      <div className="text-xs text-white/60">
+                        {mp >= 70 ? "" : mp <= 30 ? "減らす" : "整える"}
+                      </div>
+                    </div>
+
+                    <div className="mt-3 h-2 w-full rounded-full border border-white/10 bg-white/5">
+                      <div className="h-2 rounded-full bg-white/30" style={{ width: `${mp}%` }} />
                     </div>
                   </div>
                 </div>
               </div>
+            </aside>
 
-              {/* 右：行き先 */}
-              <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm md:p-6">
-                <div className="mb-4">
-                  <div className="text-xs font-semibold tracking-[0.18em] text-white/60">
-                    START
-                  </div>
-                  <div className="mt-2 text-2xl font-semibold text-white">次にすること</div>
-                  <p className="mt-2 text-sm text-white/65">
-                    Newで鑑定結果まで出ます。補足がある時だけChatへ。
-                    <br />
-                    どのページでも、鑑定の入れ物はこの選択が自動適用されます。
-                    <br />
-                    変更したい時だけ、Welcomeに戻ってください。
-                  </p>
+            {/* RIGHT */}
+            <section className="rounded-[26px] border border-white/12 bg-white/6 p-4 shadow-[0_30px_110px_rgba(0,0,0,0.55)] backdrop-blur-2xl md:p-6">
+              <div className="mb-4 rounded-2xl border border-white/10 bg-white/7 px-5 py-4">
+                <div className="text-xs font-semibold tracking-[0.18em] text-white/55">WELCOME</div>
+                <div className="mt-2 text-xl font-semibold text-white">ここで、整えてから占う。</div>
+                <div className="mt-1 text-sm text-white/55">迷ってるままでも大丈夫。まずは入口だけ決めよう。</div>
+              </div>
+
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/6 px-4 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={chip(!!drawMode)}>
+                    カード：{drawMode === "self" ? "自分で引く" : drawMode === "ai" ? "AIが引く" : "未選択"}
+                  </span>
+                  <span className={chip(readyScope)}>
+                    入れ物：{readyScope ? scopeLabel(scope) : "未選択"}
+                  </span>
                 </div>
 
-                <div className="grid gap-3">
-                  <Link
-                    href="/new"
-                    className={primaryBtn(ready)}
-                    aria-disabled={!ready}
-                    onClick={(e) => {
-                      if (!ready) e.preventDefault();
-                    }}
-                  >
-                    一時鑑定（Newで完結）
-                  </Link>
+                <button
+                  type="button"
+                  onClick={resetAll}
+                  className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
+                >
+                  リセット
+                </button>
+              </div>
+
+              {/* STEP 1 */}
+              <div className="rounded-2xl border border-white/10 bg-white/7 p-5">
+                <div className="text-xs font-semibold tracking-[0.18em] text-white/55">STEP 1</div>
+                <div className="mt-2 text-lg font-semibold text-white">カードを用意する？</div>
+                <div className="mt-1 text-sm text-white/55">手元にあるなら「自分で引く」。ないなら「AIが引く」。</div>
+
+                <div className="mt-4 grid gap-3">
+                  <button type="button" onClick={() => pickDrawMode("self")} className={choiceBtn(drawMode === "self")}>
+                    自分で引く（カードあり）
+                  </button>
+                  <button type="button" onClick={() => pickDrawMode("ai")} className={choiceBtn(drawMode === "ai")}>
+                    AIが引く（カードなし）
+                  </button>
+                </div>
+              </div>
+
+              {/* STEP 2 */}
+              <div className="mt-4 rounded-2xl border border-white/10 bg-white/7 p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-semibold tracking-[0.18em] text-white/55">STEP 2</div>
+                    <div className="mt-2 text-lg font-semibold text-white">誰を占う？</div>
+                    <div className="mt-1 text-sm text-white/55">あなた / 相談者　混ざりません。</div>
+                  </div>
 
                   <Link
-                    href="/read"
-                    className={primaryBtn(ready)}
-                    aria-disabled={!ready}
-                    onClick={(e) => {
-                      if (!ready) e.preventDefault();
-                    }}
+                    href="/maintain"
+                    className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
                   >
-                    履歴（Read）
+                    相談者カルテ編集
                   </Link>
+                </div>
 
-                  <Link
-                    href="/chat"
-                    className={primaryBtn(ready)}
-                    aria-disabled={!ready}
-                    onClick={(e) => {
-                      if (!ready) e.preventDefault();
-                    }}
+                <div className="mt-4 grid gap-3">
+                  <button type="button" onClick={chooseSelf} className={choiceBtn(scope?.targetType === "self")}>
+                    あなた（セルフ）
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setOpenProfiles((v) => !v)}
+                    className="rounded-2xl border border-white/12 bg-white/8 px-4 py-3 text-sm font-semibold text-white/85 hover:bg-white/12"
+                    disabled={!drawMode}
                   >
-                    補足質問（Chat）
-                  </Link>
+                    {openProfiles ? "相談者カルテ一覧を閉じる" : "相談者カルテから選ぶ"}
+                  </button>
 
-                  {nextPath ? (
-                    <Link
-                      href={nextPath}
-                      className={primaryBtn(ready)}
-                      aria-disabled={!ready}
-                      onClick={(e) => {
-                        if (!ready) e.preventDefault();
-                      }}
-                    >
-                      さっきのページへ戻る
-                    </Link>
+                  {openProfiles ? (
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                      <div className="mt-1 text-xs text-white/55">選んだら自動で閉じます</div>
+
+                      <div className="mt-3">
+                        <input
+                          value={q}
+                          onChange={(e) => setQ(e.target.value)}
+                          placeholder="検索（名前 / 関係 / メモ）"
+                          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white shadow-sm outline-none placeholder:text-white/35 focus:border-white/20"
+                        />
+                      </div>
+
+                      <div className="mt-3 max-h-[360px] overflow-auto rounded-2xl border border-white/10">
+                        {checking ? (
+                          <div className="px-4 py-4 text-sm text-white/55">読み込み中…</div>
+                        ) : filtered.length === 0 ? (
+                          <div className="px-4 py-4 text-sm text-white/55">まだ相談者カルテがありません。</div>
+                        ) : (
+                          <ul className="divide-y divide-white/10">
+                            {filtered.map((p) => {
+                              const active =
+                                scope?.targetType === "client" && scope.clientProfileId === p.id;
+                              return (
+                                <li key={p.id} className="p-3">
+                                  <button
+                                    type="button"
+                                    onClick={() => chooseClient(p)}
+                                    className={clsx(
+                                      "w-full rounded-2xl border px-4 py-3 text-left transition",
+                                      active
+                                        ? "border-white/25 bg-white/16 text-white"
+                                        : "border-white/10 bg-white/6 text-white/85 hover:bg-white/10"
+                                    )}
+                                  >
+                                    <div className="flex items-center justify-between gap-3">
+                                      <div className="text-sm font-semibold">{p.display_name}</div>
+                                      <span className="text-xs text-white/50">
+                                        {p.relationship_type ?? ""}
+                                      </span>
+                                    </div>
+                                    {p.memo ? (
+                                      <div className="mt-2 line-clamp-2 text-sm text-white/60">
+                                        {p.memo}
+                                      </div>
+                                    ) : null}
+                                  </button>
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {/* ✅ 生年月日（選択に応じて表示） */}
+                  <div className="mt-2 rounded-2xl border border-white/10 bg-white/6 p-4">
+                    <div className="text-xs font-semibold tracking-[0.18em] text-white/55">BIRTH DATE</div>
+
+                    {scope?.targetType === "self" ? (
+                      <>
+                        <div className="mt-2 text-sm font-semibold text-white">あなたの生年月日</div>
+                        <div className="mt-1 text-xs text-white/55">任意。次回の入力を省けます。</div>
+
+                        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto] md:items-center">
+                          <input
+                            type="date"
+                            value={selfBirth}
+                            onChange={(e) => setSelfBirth(e.target.value)}
+                            className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white shadow-sm outline-none focus:border-white/20"
+                          />
+                          <button
+                            type="button"
+                            onClick={saveSelfBirthDate}
+                            disabled={selfBirthSaving || !userId}
+                            className={clsx(
+                              "rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm transition",
+                              selfBirthSaving || !userId
+                                ? "cursor-not-allowed border-white/8 bg-white/5 text-white/35"
+                                : "border-white/12 bg-white/8 text-white/85 hover:bg-white/12"
+                            )}
+                          >
+                            {selfBirthSaving ? "保存中…" : "保存"}
+                          </button>
+                        </div>
+
+                        {selfBirthMsg ? (
+                          <div className="mt-2 text-xs text-white/60">{selfBirthMsg}</div>
+                        ) : null}
+                      </>
+                    ) : scope?.targetType === "client" ? (
+                      <>
+                        <div className="mt-2 text-sm font-semibold text-white">
+                          相談者の生年月日{scope.clientDisplayName ? `（${scope.clientDisplayName}）` : ""}
+                        </div>
+                        <div className="mt-1 text-xs text-white/55">任意。次回の入力を省けます。</div>
+
+                        <div className="mt-3 grid gap-2 md:grid-cols-[1fr_auto] md:items-center">
+                          <input
+                            type="date"
+                            value={clientBirth}
+                            onChange={(e) => setClientBirth(e.target.value)}
+                            className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white shadow-sm outline-none focus:border-white/20"
+                          />
+                          <button
+                            type="button"
+                            onClick={saveClientBirthDate}
+                            disabled={clientBirthSaving || !scope.clientProfileId}
+                            className={clsx(
+                              "rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm transition",
+                              clientBirthSaving || !scope.clientProfileId
+                                ? "cursor-not-allowed border-white/8 bg-white/5 text-white/35"
+                                : "border-white/12 bg-white/8 text-white/85 hover:bg-white/12"
+                            )}
+                          >
+                            {clientBirthSaving ? "保存中…" : "保存"}
+                          </button>
+                        </div>
+
+                        {clientBirthMsg ? (
+                          <div className="mt-2 text-xs text-white/60">{clientBirthMsg}</div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <div className="mt-2 text-sm text-white/55">
+                        「あなた」か「相談者」を選ぶと、生年月日を登録できます。
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 text-xs text-white/55">private beta</div>
+            </section>
+          </div>
+
+          {/* 画面下固定CTA */}
+          <div className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#0B1020]/70 backdrop-blur-xl">
+            <div className="mx-auto max-w-6xl px-4 py-3 md:px-6">
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-white/70">
+                  <span className={chip(!!drawMode)}>
+                    {drawMode === "self" ? "自分で引く" : drawMode === "ai" ? "AIが引く" : "カード未選択"}
+                  </span>
+                  <span className={chip(readyScope)}>
+                    {readyScope ? scopeLabel(scope) : "引き出し未選択"}
+                  </span>
+                  {!ready ? (
+                    <span className="text-white/45">※「カード」と「引き出し」を選ぶと押せます</span>
                   ) : null}
                 </div>
 
-                {!ready ? (
-                  <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
-                    まず「自分」か「カルテ」を選んでください。<br />
-                    （安全のため、未選択のまま他ページは開けません）
-                  </div>
-                ) : (
-                  <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-white/70">
-                    選択OK：<span className="font-semibold text-white">{scopeLabel(scope)}</span>
-                    <br />
-                    このまま鑑定へ進めます。
-                  </div>
-                )}
+                <div className="grid grid-cols-2 gap-2 md:flex md:items-center">
+                  <Link
+                    href={primaryHref}
+                    aria-disabled={!ready}
+                    onClick={(e) => {
+                      if (!ready) e.preventDefault();
+                    }}
+                    className={clsx(
+                      "rounded-2xl border px-4 py-3 text-center text-sm font-semibold shadow-sm transition",
+                      ready
+                        ? "border-white/18 bg-white/14 text-white hover:bg-white/18"
+                        : "cursor-not-allowed border-white/8 bg-white/5 text-white/35"
+                    )}
+                  >
+                    {primaryLabel}
+                  </Link>
 
-                <div className="mt-6 flex items-center justify-between text-xs text-white/45">
-                  <span>Tarot Studio / private beta</span>
-                  <span>静かに、深く。</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    {/* ✅ 相談履歴はいつでも押せる */}
+                    <Link
+                      href="/read"
+                      className="rounded-2xl border border-white/12 bg-white/8 px-3 py-3 text-center text-xs font-semibold text-white/85 shadow-sm transition hover:bg-white/12"
+                    >
+                      相談履歴
+                    </Link>
+
+                    <Link
+                      href="/chat"
+                      aria-disabled={!readyScope}
+                      onClick={(e) => {
+                        if (!readyScope) e.preventDefault();
+                      }}
+                      className={clsx(
+                        "rounded-2xl border px-3 py-3 text-center text-xs font-semibold shadow-sm transition",
+                        readyScope
+                          ? "border-white/12 bg-white/8 text-white/85 hover:bg-white/12"
+                          : "cursor-not-allowed border-white/8 bg-white/5 text-white/35"
+                      )}
+                    >
+                      AI対話相談へ
+                    </Link>
+                  </div>
                 </div>
               </div>
             </div>
-          </section>
+          </div>
 
-          <div className="h-10" />
         </div>
       </div>
     </main>

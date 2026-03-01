@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import { getOrCreateDailyCards as getDailyCards } from "@/lib/dailyCards";
+import AuditGeoFull from "./AuditGeoFull"; // ✅ これを使う
 import {
   loadScope,
   saveScope,
@@ -26,8 +27,6 @@ type ClientProfileRow = {
   last_reading_at: string | null;
 };
 
-type ChatScopeLabel = string;
-
 type WeatherView = {
   locationLabel: string;
   currentTempC: number | null;
@@ -38,15 +37,6 @@ type WeatherView = {
 
 function clsx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
-}
-
-function safeJsonParse<T>(v: string | null): T | null {
-  if (!v) return null;
-  try {
-    return JSON.parse(v) as T;
-  } catch {
-    return null;
-  }
 }
 
 function weatherCodeLabel(code: number | null | undefined): string | null {
@@ -148,7 +138,6 @@ function moonEmoji(age: number): string {
 }
 
 // ---- Card image helper ----
-// 画像がある場合：public/cards/rws/<slug>.jpg で表示される（無ければ自動で消えてテキストだけ残る）
 function slugifyCardName(name: string): string {
   return name
     .toLowerCase()
@@ -160,12 +149,71 @@ function cardImageSrc(name: string): string {
   return `/cards/rws/${slugifyCardName(name)}.jpg`;
 }
 
+// ---- Mini fortune (simple, fast) ----
+function dailyMiniFortune(names: string[]): string {
+  const cards = (names ?? []).slice(0, 3).map((x) => (x ?? "").toLowerCase());
+
+  // ざっくりテーマ辞書（必要なら増やせる）
+  const MAJOR_THEME: Array<[RegExp, string]> = [
+    [/the tower|tower/, "予定変更や衝撃に備える日。崩れる前に整えるのが吉。"],
+    [/death/, "切り替えの日。終わらせて、次に移すほど軽くなる。"],
+    [/the star|star/, "回復と希望。焦らず、良い方に寄せていける。"],
+    [/the moon|moon/, "不安が膨らみやすい日。事実と想像を分けると落ち着く。"],
+    [/the sun|sun/, "明るさが戻る日。小さくても前に進める。"],
+    [/judgement|judgment/, "再スタート。過去のやり直しより、今の選択を。"],
+    [/the world|world/, "一区切り。仕上げ・完了に強い流れ。"],
+    [/wheel of fortune|wheel/, "流れが動く日。固執せず、波に合わせると良い。"],
+    [/the lovers|lovers/, "選択と向き合う日。曖昧を減らすほど楽になる。"],
+    [/the hermit|hermit/, "内省の日。静かな時間が回復になる。"],
+    [/temperance/, "バランス調整。急がず整えるほどうまくいく。"],
+  ];
+
+  const SUIT_THEME: Array<[RegExp, string]> = [
+    [/swords/, "言葉と考えがテーマ。結論を急がず、整理してから。"],
+    [/cups/, "気持ちがテーマ。無理に強くならず、やさしく整える。"],
+    [/wands/, "勢いがテーマ。小さく着火して、動き出すと伸びる。"],
+    [/pentacles/, "現実とお金がテーマ。足元を固めるほど安心する。"],
+  ];
+
+  // まず大アルカナ優先で当てる
+  for (const c of cards) {
+    for (const [re, msg] of MAJOR_THEME) {
+      if (re.test(c)) return msg;
+    }
+  }
+
+  // 次にスートの雰囲気
+  let hits = 0;
+  const suitCount = { swords: 0, cups: 0, wands: 0, pentacles: 0 };
+  for (const c of cards) {
+    if (c.includes("swords")) (suitCount.swords++, hits++);
+    else if (c.includes("cups")) (suitCount.cups++, hits++);
+    else if (c.includes("wands")) (suitCount.wands++, hits++);
+    else if (c.includes("pentacles")) (suitCount.pentacles++, hits++);
+  }
+
+  const topSuit = (Object.keys(suitCount) as Array<keyof typeof suitCount>).sort(
+    (a, b) => suitCount[b] - suitCount[a]
+  )[0];
+
+  const suitRe = new RegExp(topSuit);
+  for (const [re, msg] of SUIT_THEME) {
+    if (re.source === suitRe.source) return msg;
+  }
+
+  // 最後の保険
+  return "今日は「整える」がテーマ。焦らず、一つずつ。";
+}
+
 export default function WelcomePage() {
   const router = useRouter();
 
   const [checking, setChecking] = useState(true);
   const [err, setErr] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+
+  // ✅ 追加：AuditGeoFullに渡すための userId
+  const [userId, setUserId] = useState<string | null>(null);
 
   const [scope, setScope] = useState<TarotScope | null>(null);
   const [profiles, setProfiles] = useState<ClientProfileRow[]>([]);
@@ -218,6 +266,9 @@ export default function WelcomePage() {
         router.replace("/login?reason=not_logged_in");
         return;
       }
+
+      // ✅ 追加：ここで userId を確実にセット
+      setUserId(session.user.id);
 
       const email = session.user.email ?? null;
       setUserEmail(email);
@@ -415,7 +466,6 @@ export default function WelcomePage() {
     }
   }
 
-  // 黒文字を潰す：importantで白固定
   const primaryBtn = (enabled: boolean) =>
     clsx(
       "w-full rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm transition !text-white",
@@ -424,8 +474,36 @@ export default function WelcomePage() {
         : "cursor-not-allowed border-white/8 bg-white/5 !text-white/60"
     );
 
+  const WeatherChip = () => (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-white/80">
+      <div className="flex items-center gap-2">
+        <span className="text-white/55">天気</span>
+        {weatherErr ? (
+          <span className="text-white/55">–</span>
+        ) : !weather ? (
+          <span className="text-white/55">取得中…</span>
+        ) : (
+          <span className="text-white/85">
+            {weather.locationLabel} / {weather.weatherLabel ?? "—"}
+            {weather.currentTempC != null ? ` / ${Math.round(weather.currentTempC)}℃` : ""}
+          </span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2 text-white/70">
+        <span className="text-white/40">月</span>
+        <span className="text-white/75">
+          {moonEmoji(moonAge)} {moonPhaseLabel(moonAge)} / {moonAge.toFixed(1)}日
+        </span>
+      </div>
+    </div>
+  );
+
   return (
     <main className="min-h-screen">
+      {/* ✅ 追加：これが無かったのが原因。Welcomeに実際に置く */}
+      <AuditGeoFull userId={userId} />
+
       <div className="relative min-h-screen overflow-hidden bg-[#0B1020]">
         <div
           className="pointer-events-none absolute inset-0"
@@ -465,21 +543,6 @@ export default function WelcomePage() {
                     招待制 / Invite only
                   </span>
                 </Link>
-
-                {/* ✅ 天気：Tarot Studioの横 */}
-                <div className="hidden items-center gap-2 rounded-full border border-white/12 bg-white/8 px-3 py-1 text-xs font-semibold !text-white/85 md:inline-flex">
-                  <span className="text-white/60">天気</span>
-                  {weatherErr ? (
-                    <span className="text-white/55">–</span>
-                  ) : !weather ? (
-                    <span className="text-white/55">取得中…</span>
-                  ) : (
-                    <span className="text-white/85">
-                      {weather.weatherLabel ?? "—"}
-                      {weather.currentTempC != null ? ` / ${Math.round(weather.currentTempC)}℃` : ""}
-                    </span>
-                  )}
-                </div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -498,82 +561,84 @@ export default function WelcomePage() {
         </div>
 
         <div className="relative mx-auto max-w-6xl px-4 py-8 md:px-6 md:py-12">
-          {/* hero: 左タイトル + 右（今日の3枚） */}
-          <header className="mb-6 grid gap-4 md:mb-10 md:grid-cols-[1fr_420px] md:items-start md:gap-6">
-            <div>
-              <h1
-                className="text-4xl tracking-tight text-white md:text-6xl"
-                style={{
-                  fontFamily:
-                    'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
-                  textShadow: "0 10px 40px rgba(0,0,0,0.55)",
-                }}
-              >
-                Welcome
-              </h1>
-              <p className="mt-3 max-w-2xl text-sm leading-7 text-white/75 md:text-base">
-                ここでだけ、鑑定の“入れ物”を選びます。<br className="hidden md:block" />
-                以降のページは自動で同じ入れ物を使い、混ざりません（プライバシー保護）。
-              </p>
-            </div>
+          {/* HERO：カード主役（中央） */}
+          <header className="mb-6 md:mb-10">
+            <div className="mx-auto max-w-[760px]">
+              {/* 見出し（小さめ） */}
+              <div className="mb-4 text-center">
+                <h1
+                  className="text-2xl tracking-tight text-white md:text-3xl"
+                  style={{
+                    fontFamily:
+                      'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+                    textShadow: "0 10px 40px rgba(0,0,0,0.55)",
+                  }}
+                >
+                  Welcome
+                </h1>
+                <p className="mt-2 text-sm leading-7 text-white/70">
+                  ここでだけ、鑑定の“入れ物”を選びます。以降のページは同じ入れ物を使い、混ざりません。
+                </p>
+              </div>
 
-                        {/* ✅ 今日の3枚：小さめ + 全体表示（トリミング無し） + ミニ鑑定 */}
-            <div className="rounded-[22px] border border-white/12 bg-white/6 p-3 shadow-[0_30px_90px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
-              <div className="rounded-2xl border border-white/10 bg-white/7 p-3 text-white">
-                <div className="text-[11px] font-semibold tracking-[0.18em] text-white/60">
-                  TODAY CARDS
+              {/* 中央：今日の3枚（主役）＋天気を同枠へ */}
+              <div className="rounded-[30px] border border-white/12 bg-white/6 p-4 shadow-[0_40px_140px_rgba(0,0,0,0.60)] backdrop-blur-2xl">
+                <div className="rounded-[26px] border border-white/10 bg-white/7 p-4">
+                  <div className="flex items-end justify-between gap-3">
+                    <div>
+                      <div className="text-xs font-semibold tracking-[0.18em] text-white/60">
+                        TODAY
+                      </div>
+                      <div className="mt-1 text-base font-semibold text-white/90">今日の3枚</div>
+                    </div>
+                  </div>
+
+                  {/* ✅ 天気＆月齢：同じ枠の中 */}
+                  <div className="mt-3">
+                    <WeatherChip />
+                  </div>
+
+                  {!dailyCards ? (
+                    <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm text-white/65">
+                      （まだありません）
+                    </div>
+                  ) : (
+                    <>
+                      {/* カード：大きめ＆全体表示（contain） */}
+                      <div className="mt-4 grid grid-cols-3 gap-3">
+                        {dailyCards.slice(0, 3).map((name, i) => (
+                          <div
+                            key={i}
+                            className="rounded-2xl border border-white/10 bg-black/20 p-3"
+                          >
+                            <div className="flex items-center justify-center rounded-xl border border-white/10 bg-white/5 py-3">
+                              <img
+                                src={cardImageSrc(name)}
+                                alt={name}
+                                className="h-[132px] w-[96px] object-contain"
+                                onError={(e) => {
+                                  (e.currentTarget as HTMLImageElement).style.display = "none";
+                                }}
+                              />
+                            </div>
+                            <div className="mt-2 text-xs text-white/75">
+                              {i + 1}: {name}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* ✅ 簡単な占い一文 */}
+                      <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-6 text-white/80">
+                        {dailyMiniFortune(dailyCards)}
+                      </div>
+
+                      <div className="mt-3 text-[11px] text-white/45">
+                        ※画像は /public/cards/rws/ に配置すると表示されます
+                      </div>
+                    </>
+                  )}
                 </div>
-                <div className="mt-1 text-sm font-semibold text-white/90">今日の3枚</div>
-
-                {!dailyCards ? (
-                  <div className="mt-2 text-sm text-white/60">（まだありません）</div>
-                ) : (
-                  <>
-                    <div className="mt-3 grid grid-cols-3 gap-2">
-                      {dailyCards.slice(0, 3).map((name, i) => (
-                        <div
-                          key={i}
-                          className="rounded-xl border border-white/10 bg-black/20 p-2"
-                        >
-                          <div className="flex items-center justify-center overflow-hidden rounded-lg border border-white/10 bg-white/5">
-                            <img
-                              src={cardImageSrc(name)}
-                              alt={name}
-                              className="h-[74px] w-[54px] object-contain"
-                              onError={(e) => {
-                                (e.currentTarget as HTMLImageElement).style.display = "none";
-                              }}
-                            />
-                          </div>
-
-                          <div className="mt-1 text-[10px] leading-4 text-white/75">
-                            {i + 1}: {name}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* ✅ ミニ鑑定（簡単な占い） */}
-                    <div className="mt-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[11px] leading-5 text-white/80">
-                      {(() => {
-                        const key = (dailyCards?.[0] ?? "").toLowerCase();
-
-                        if (key.includes("five of cups"))
-                          return "今日は「失ったもの」に気持ちが引っ張られやすい日。残ってるものを一つ拾うと流れが戻る。";
-                        if (key.includes("three of swords"))
-                          return "今日は心がチクッとしやすい日。無理に元気を作らず、距離を取って休憩が吉。";
-                        if (key.includes("king of cups"))
-                          return "今日は落ち着きが武器。感情を抱え込みすぎず、静かに整えるほど強い。";
-
-                        return "今日は「気持ちの整理」と「ペース調整」がテーマ。焦らず、一つずつ。";
-                      })()}
-                    </div>
-
-                    <div className="mt-2 text-[10px] text-white/45">
-                      ※画像は /public/cards/rws/ に配置すると表示されます
-                    </div>
-                  </>
-                )}
               </div>
             </div>
           </header>
@@ -807,18 +872,6 @@ export default function WelcomePage() {
           </section>
 
           <div className="h-10" />
-        </div>
-
-        {/* ✅ 月齢：右下固定 */}
-        <div className="fixed bottom-4 right-4 z-40 w-[220px] rounded-2xl border border-white/12 bg-white/6 p-4 text-white shadow-[0_25px_80px_rgba(0,0,0,0.55)] backdrop-blur-2xl">
-          <div className="text-xs font-semibold tracking-[0.18em] text-white/60">MOON</div>
-          <div className="mt-2 flex items-center justify-between">
-            <div className="text-sm font-semibold text-white/90">月齢</div>
-            <div className="text-xs text-white/60">
-              {moonEmoji(moonAge)} {moonPhaseLabel(moonAge)}
-            </div>
-          </div>
-          <div className="mt-2 text-sm text-white/85">月齢 {moonAge.toFixed(1)} 日</div>
         </div>
       </div>
     </main>

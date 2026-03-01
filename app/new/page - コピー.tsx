@@ -42,6 +42,10 @@ const SPREADS: SpreadDef[] = [
   { key: "thirteen_full", label: "13枚（フル）" },
 ];
 
+function clsx(...xs: Array<string | false | null | undefined>) {
+  return xs.filter(Boolean).join(" ");
+}
+
 const PRESETS = [
   {
     key: "love_5",
@@ -87,7 +91,7 @@ const PRESETS = [
   },
 ];
 
-type GenerateOk = { ok: true; text: string; prompt_updated_at?: string | null; reading_id?: string | null };
+type GenerateOk = { ok: true; text: string; prompt_updated_at?: string | null };
 type GenerateNg = { ok: false; message?: string };
 type GenerateResp = GenerateOk | GenerateNg;
 
@@ -191,10 +195,6 @@ function moonPct(age: number) {
   return Math.round((1 - (t - 0.5) / 0.5) * 100);
 }
 
-function clsx(...xs: Array<string | false | null | undefined>) {
-  return xs.filter(Boolean).join(" ");
-}
-
 export default function NewPage() {
   const router = useRouter();
 
@@ -210,7 +210,10 @@ export default function NewPage() {
   const [tone, setTone] = useState<ToneKey>("direct");
 
   const [presetKey, setPresetKey] = useState(PRESETS[0].key);
-  const preset = useMemo(() => PRESETS.find((p) => p.key === presetKey) ?? PRESETS[0], [presetKey]);
+  const preset = useMemo(
+    () => PRESETS.find((p) => p.key === presetKey) ?? PRESETS[0],
+    [presetKey]
+  );
 
   const [draft, setDraft] = useState(preset.text);
   const [err, setErr] = useState<string | null>(null);
@@ -218,14 +221,20 @@ export default function NewPage() {
   const [generating, setGenerating] = useState(false);
   const [resultText, setResultText] = useState<string | null>(null);
 
-  // 材料
+  // ✅ 追加：鑑定材料
   const [userBirthDate, setUserBirthDate] = useState<string | null>(null);
   const [clientBirthDate, setClientBirthDate] = useState<string | null>(null);
   const [weather, setWeather] = useState<WeatherPayload | null>(null);
-  const [moon, setMoon] = useState<{ ageDays: number; phaseLabel: string; pct: number } | null>(null);
+  const [moon, setMoon] = useState<{ ageDays: number; phaseLabel: string; pct: number } | null>(
+    null
+  );
 
-  const spreadLabel = useMemo(() => SPREADS.find((s) => s.key === spread)?.label ?? spread, [spread]);
-  const toneLabel = tone === "warm" ? "やわらかめ" : tone === "neutral" ? "ニュートラル" : "はっきり";
+  const spreadLabel = useMemo(
+    () => SPREADS.find((s) => s.key === spread)?.label ?? spread,
+    [spread]
+  );
+  const toneLabel =
+    tone === "warm" ? "やわらかめ" : tone === "neutral" ? "ニュートラル" : "はっきり";
 
   useEffect(() => {
     setDraft(preset.text);
@@ -291,20 +300,26 @@ export default function NewPage() {
       setUserEmail(email);
       setCheckingAuth(false);
 
-      const { data: deckRows } = await supabase.from("deck_library").select("key, name").order("name", { ascending: true });
+      // ✅ decks
+      const { data: deckRows } = await supabase
+        .from("deck_library")
+        .select("key, name")
+        .order("name", { ascending: true });
+
       const list = (deckRows ?? []) as DeckRow[];
       setDecks(list);
 
       if (list.some((d) => d.key === "rws")) setDeckKey("rws");
       else if (list[0]?.key) setDeckKey(list[0].key);
 
+      // ✅ user_profile birth_date
       const { data: up } = await supabase
         .from("user_profile")
         .select("birth_date")
         .eq("user_id", uid)
         .maybeSingle();
 
-      if (!cancelled) setUserBirthDate((up as any)?.birth_date ?? null);
+      setUserBirthDate((up as any)?.birth_date ?? null);
     })();
 
     return () => {
@@ -312,7 +327,7 @@ export default function NewPage() {
     };
   }, [router]);
 
-  // client birth_date
+  // ✅ client birth_date（scopeがclientの時だけ）
   useEffect(() => {
     let cancelled = false;
 
@@ -342,7 +357,7 @@ export default function NewPage() {
     };
   }, [scope]);
 
-  // moon
+  // ✅ moon（1分ごと）
   useEffect(() => {
     const update = () => {
       const age = moonAgeDaysJST(new Date());
@@ -353,7 +368,7 @@ export default function NewPage() {
     return () => clearInterval(t);
   }, []);
 
-  // weather
+  // ✅ weather（起動時に1回）
   useEffect(() => {
     let cancelled = false;
 
@@ -411,8 +426,6 @@ export default function NewPage() {
   }
 
   async function generateOnce() {
-    if (!scope) return;
-
     setErr(null);
     setGenerating(true);
     setResultText(null);
@@ -420,7 +433,9 @@ export default function NewPage() {
     try {
       const theme = scopeLabel(scope);
       const title = `New / ${deckKey} / ${spreadLabel} / ${toneLabel}`;
-      const guard = "\n\n【ルール】AIはユーザーに追加質問をしない。鑑定文だけで完結させる。";
+
+      const guard =
+        "\n\n【ルール】AIはユーザーに追加質問をしない。鑑定文だけで完結させる。";
 
       const res = await fetch("/api/generate", {
         method: "POST",
@@ -434,6 +449,7 @@ export default function NewPage() {
           tone,
           cardsText: String(draft ?? "") + guard,
 
+          // ✅ 追加材料（route.ts が読む）
           userId,
           targetType: scope?.targetType ?? null,
           clientProfileId: scope?.targetType === "client" ? scope.clientProfileId : null,
@@ -445,6 +461,7 @@ export default function NewPage() {
       });
 
       const data = (await res.json().catch(() => null)) as GenerateResp | null;
+
       if (!res.ok) {
         const msg = (data as any)?.message ?? `生成に失敗しました（${res.status}）`;
         throw new Error(msg);
@@ -485,19 +502,17 @@ export default function NewPage() {
     setErr(null);
   }
 
-  const chip = (on: boolean) =>
-    clsx(
-      "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold",
-      on ? "border-white/18 bg-white/12 text-white" : "border-white/10 bg-white/6 text-white/60"
-    );
-
-  const ready = !generating; // 下固定CTAは常時表示。押せないのは generating 中だけ。
-
   const selectBase =
-    "w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/90 shadow-sm outline-none focus:border-white/20";
+    "w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm shadow-sm outline-none focus:border-white/20";
+  const optionBase = "bg-[#0B1020] text-white";
 
-  const box =
-    "rounded-[26px] border border-white/12 bg-white/6 p-4 shadow-[0_30px_110px_rgba(0,0,0,0.55)] backdrop-blur-2xl";
+  const primaryBtn = (enabled: boolean) =>
+    clsx(
+      "rounded-2xl border px-4 py-3 text-sm font-semibold shadow-sm transition",
+      enabled
+        ? "border-white/15 bg-white/10 text-white hover:bg-white/14"
+        : "cursor-not-allowed border-white/8 bg-white/5 text-white/35"
+    );
 
   if (!scope) {
     return (
@@ -505,7 +520,9 @@ export default function NewPage() {
         <div className="mx-auto max-w-3xl px-6 py-14">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-2xl">
             <div className="text-sm text-white/70">準備中…</div>
-            <div className="mt-2 text-lg font-semibold">Welcomeでスコープを選んでから来てください</div>
+            <div className="mt-2 text-lg font-semibold">
+              Welcomeでスコープを選んでから来てください
+            </div>
           </div>
         </div>
       </main>
@@ -513,180 +530,184 @@ export default function NewPage() {
   }
 
   return (
-    <main className="min-h-screen">
-      {/* ✅ layout触らず option白問題を潰す（このページだけ） */}
-      <style jsx global>{`
-        select { color-scheme: dark; }
-        select option {
-          background: #0b1020 !important;
-          color: rgba(255,255,255,0.92) !important;
-        }
-      `}</style>
-
-      <div className="relative min-h-screen overflow-hidden bg-[#0B1020] text-white">
+    <main className="min-h-screen bg-[#0B1020] text-white">
+      <div className="pointer-events-none fixed inset-0">
         <div
-          className="pointer-events-none absolute inset-0"
+          className="absolute inset-0"
           style={{
             background:
               "radial-gradient(1200px 700px at 18% 22%, rgba(120,140,255,0.18), transparent 60%)," +
               "radial-gradient(900px 520px at 82% 30%, rgba(255,255,255,0.06), transparent 62%)," +
+              "radial-gradient(1100px 700px at 50% 100%, rgba(0,0,0,0.55), transparent 60%)," +
               "linear-gradient(180deg, rgba(5,8,18,0.86) 0%, rgba(10,15,30,0.92) 35%, rgba(3,5,12,0.96) 100%)",
           }}
         />
-        <Stars />
+      </div>
 
-        {/* ✅ Header（Welcomeと同型） */}
-        <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/55 backdrop-blur-xl">
-          <div className="mx-auto max-w-6xl px-4 py-3 md:px-6">
-            <div className="flex items-center justify-between gap-3">
-              <Link
-                href="/welcome"
-                className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 transition hover:bg-white/5"
-                aria-label="Tarot Studio（Welcomeへ）"
-              >
-                <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/10 text-xs font-semibold text-white/80">
-                  TS
-                </span>
-                <span className="text-base font-semibold tracking-tight text-white md:text-lg">
-                  Tarot Studio
-                </span>
-                <span className="hidden rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-white/80 sm:inline-flex">
-                  招待制 / Invite only
-                </span>
-              </Link>
+      <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/60 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-3 px-4 py-3 md:px-6">
+          <Link
+            href="/welcome"
+            className="inline-flex items-center gap-3 rounded-2xl px-2 py-1 transition hover:bg-white/5"
+            aria-label="Tarot Studio（Welcomeへ）"
+          >
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/10 text-xs font-semibold text-white/80">
+              TS
+            </span>
+            <span
+              className="text-base font-semibold tracking-tight text-white md:text-lg"
+              style={{
+                fontFamily: 'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+              }}
+            >
+              Tarot Studio
+            </span>
+          </Link>
 
-              <div className="flex items-center gap-2">
-                <span className="hidden text-xs text-white/55 md:inline">
-                  {checkingAuth ? "確認中…" : userEmail ? `ログイン中：${userEmail}` : ""}
-                </span>
-                <button
-                  onClick={logout}
-                  className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
-                >
-                  ログアウト
-                </button>
-              </div>
-            </div>
+          <div className="flex items-center gap-2">
+            <span className="hidden rounded-full border border-white/12 bg-white/8 px-3 py-1 text-xs font-semibold text-white/70 md:inline-flex">
+              {scopeLabel(scope)}
+            </span>
+
+            <Link
+              href="/read"
+              className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
+            >
+              履歴
+            </Link>
+
+            <button
+              type="button"
+              onClick={logout}
+              className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
+            >
+              ログアウト
+            </button>
           </div>
         </div>
+      </div>
 
-        {/* ✅ Footerぶん余白 */}
-        <div className="relative mx-auto max-w-6xl px-4 py-7 pb-28 md:px-6 md:py-10 md:pb-32">
-          {err ? (
-            <div className="mb-4 rounded-2xl border border-rose-300/20 bg-rose-500/10 px-5 py-4 text-sm text-rose-100">
-              {err}
-            </div>
-          ) : null}
+      <div className="relative mx-auto max-w-6xl px-4 py-6 md:px-6 md:py-10">
+        <header className="mb-5 md:mb-7">
+          <h1
+            className="text-3xl tracking-tight text-white md:text-5xl"
+            style={{
+              fontFamily: 'ui-serif, "Noto Serif JP", "Hiragino Mincho ProN", "Yu Mincho", serif',
+              textShadow: "0 10px 40px rgba(0,0,0,0.55)",
+            }}
+          >
+            New（ここで一時鑑定まで）
+          </h1>
+          <p className="mt-2 text-sm text-white/70 md:text-base">相談の入れ物 / {scopeLabel(scope)}</p>
+          <p className="mt-1 text-xs text-white/50">
+            {checkingAuth ? "ログイン確認中…" : userEmail ? `ログイン中：${userEmail}` : ""}
+          </p>
+        </header>
 
-          <div className="grid gap-4 md:grid-cols-[420px_1fr] md:gap-6">
-            {/* LEFT */}
-            <aside className="md:sticky md:top-[84px] self-start">
-              <div className={box}>
-                <div className="rounded-[22px] border border-white/10 bg-white/7 p-4">
-                  <div className="text-xs font-semibold tracking-[0.18em] text-white/60">NEW</div>
-                  <div className="mt-1 text-base font-semibold text-white/90">ここで一時鑑定</div>
+        {err ? (
+          <div className="mb-5 rounded-2xl border border-rose-200/30 bg-rose-500/10 px-5 py-4 text-sm text-rose-200 backdrop-blur-2xl">
+            {err}
+          </div>
+        ) : null}
 
-                  <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80">
-                    いまの状況を、短く・強く言語化する。
-                  </div>
+        <section className="rounded-[28px] border border-white/12 bg-white/6 p-3 shadow-[0_40px_120px_rgba(0,0,0,0.55)] backdrop-blur-2xl sm:p-4 md:p-6">
+          <div className="grid gap-4 md:gap-6 lg:grid-cols-4">
+            {/* 左：設定 */}
+            <aside className="lg:col-span-1 space-y-4 md:space-y-6">
+              <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold text-white/90">プリセット</div>
+                  <span className="text-[11px] font-semibold text-white/45">PRESET</span>
+                </div>
 
-                  <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                    <div className="text-xs font-semibold tracking-[0.18em] text-white/55">PRESET</div>
-                    <div className="mt-3 space-y-2">
-                      {PRESETS.map((p) => (
-                        <button
-                          key={p.key}
-                          type="button"
-                          onClick={() => setPresetKey(p.key)}
-                          className={clsx(
-                            "w-full rounded-2xl border px-4 py-3 text-left transition",
-                            p.key === presetKey
-                              ? "border-white/25 bg-white/16 text-white"
-                              : "border-white/10 bg-white/6 text-white/85 hover:bg-white/10"
-                          )}
-                        >
-                          <div className="text-xs font-semibold">{p.title}</div>
-                          <div className="mt-1 text-[11px] text-white/60">{p.desc}</div>
-                        </button>
+                <div className="mt-3 space-y-2">
+                  {PRESETS.map((p) => (
+                    <button
+                      key={p.key}
+                      type="button"
+                      onClick={() => setPresetKey(p.key)}
+                      className={clsx(
+                        "w-full rounded-2xl border px-4 py-3 text-left shadow-sm transition",
+                        p.key === presetKey
+                          ? "border-white/18 bg-white/12"
+                          : "border-white/10 bg-white/6 hover:bg-white/10"
+                      )}
+                    >
+                      <div className="text-xs font-semibold text-white/90">{p.title}</div>
+                      <div className="mt-1 text-[11px] leading-5 text-white/60">{p.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-semibold text-white/90">設定</div>
+                  <span className="text-[11px] font-semibold text-white/45">CONFIG</span>
+                </div>
+
+                <div className="mt-4 space-y-4">
+                  <div>
+                    <div className="mb-2 text-xs font-semibold text-white/70">デッキ</div>
+                    <select value={deckKey} onChange={(e) => setDeckKey(e.target.value)} className={selectBase}>
+                      {decks.length === 0 ? <option className={optionBase} value="rws">rws</option> : null}
+                      {decks.map((d) => (
+                        <option className={optionBase} key={d.key} value={d.key}>
+                          {d.name ?? d.key}
+                        </option>
                       ))}
-                    </div>
+                    </select>
                   </div>
 
-                  <div className="mt-3 rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
-                    <div className="text-xs font-semibold tracking-[0.18em] text-white/55">CONFIG</div>
-                    <div className="mt-3 space-y-3">
-                      <div>
-                        <div className="mb-2 text-xs font-semibold text-white/70">デッキ</div>
-                        <select value={deckKey} onChange={(e) => setDeckKey(e.target.value)} className={selectBase}>
-                          {decks.length === 0 ? <option value="rws">rws</option> : null}
-                          {decks.map((d) => (
-                            <option key={d.key} value={d.key}>
-                              {d.name ?? d.key}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <div className="mb-2 text-xs font-semibold text-white/70">スプレッド</div>
-                        <select value={spread} onChange={(e) => setSpread(e.target.value as SpreadKey)} className={selectBase}>
-                          {SPREADS.map((s) => (
-                            <option key={s.key} value={s.key}>
-                              {s.label}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div>
-                        <div className="mb-2 text-xs font-semibold text-white/70">トーン</div>
-                        <select value={tone} onChange={(e) => setTone(e.target.value as ToneKey)} className={selectBase}>
-                          <option value="warm">やわらかめ</option>
-                          <option value="neutral">ニュートラル</option>
-                          <option value="direct">はっきり</option>
-                        </select>
-                      </div>
-
-                      <div className="text-xs text-white/55">
-                        材料：生年月日 {userBirthDate ? "✓" : "—"} / 天気 {weather ? "✓" : "—"} / 月 {moon ? "✓" : "—"}
-                      </div>
-                    </div>
+                  <div>
+                    <div className="mb-2 text-xs font-semibold text-white/70">スプレッド</div>
+                    <select value={spread} onChange={(e) => setSpread(e.target.value as SpreadKey)} className={selectBase}>
+                      {SPREADS.map((s) => (
+                        <option className={optionBase} key={s.key} value={s.key}>
+                          {s.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
 
-                  <div className="mt-3 text-xs text-white/45">Tarot Studio / private beta</div>
+                  <div>
+                    <div className="mb-2 text-xs font-semibold text-white/70">トーン</div>
+                    <select value={tone} onChange={(e) => setTone(e.target.value as ToneKey)} className={selectBase}>
+                      <option className={optionBase} value="warm">やわらかめ</option>
+                      <option className={optionBase} value="neutral">ニュートラル</option>
+                      <option className={optionBase} value="direct">はっきり</option>
+                    </select>
+                  </div>
+
+                  <div className="text-xs text-white/55">
+                    現在：
+                    <span className="font-semibold text-white/85"> {deckKey}</span> /{" "}
+                    <span className="font-semibold text-white/85">{spreadLabel}</span> /{" "}
+                    <span className="font-semibold text-white/85">{toneLabel}</span>
+                  </div>
                 </div>
               </div>
             </aside>
 
-            {/* RIGHT */}
-            <section className={clsx("rounded-[26px] border border-white/12 bg-white/6 p-4 shadow-[0_30px_110px_rgba(0,0,0,0.55)] backdrop-blur-2xl md:p-6")}>
-              {/* ✅ 何を選んだか常に分かる（Welcome寄せ） */}
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/6 px-4 py-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className={chip(true)}>入れ物：{scopeLabel(scope)}</span>
-                  <span className={chip(true)}>デッキ：{deckKey}</span>
-                  <span className={chip(true)}>スプレッド：{spreadLabel}</span>
-                  <span className={chip(true)}>トーン：{toneLabel}</span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDraft(preset.text);
-                    setResultText(null);
-                    setErr(null);
-                  }}
-                  className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
-                >
-                  下書きリセット
-                </button>
-              </div>
-
+            {/* 右：相談＋結果 */}
+            <section className="lg:col-span-3 space-y-4 md:space-y-6">
               {/* 相談 */}
-              <div className="rounded-2xl border border-white/10 bg-white/7 p-5">
-                <div className="text-xs font-semibold tracking-[0.18em] text-white/55">INPUT</div>
-                <div className="mt-2 text-lg font-semibold text-white">相談文</div>
-                <div className="mt-1 text-sm text-white/55">ここで一時鑑定まで。</div>
+              <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm sm:p-6">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-white/90">相談文</div>
+                    <div className="mt-2 text-xs text-white/55">
+                      ここで一時鑑定まで完結。補足疑問が出たときだけChatへ進みます。
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => copyText(draft)}
+                    className="rounded-xl border border-white/12 bg-white/8 px-4 py-3 text-sm font-semibold text-white/85 shadow-sm hover:bg-white/12"
+                  >
+                    下書きコピー
+                  </button>
+                </div>
 
                 <div className="mt-4">
                   <textarea
@@ -698,27 +719,28 @@ export default function NewPage() {
                   />
                 </div>
 
-                <div className="mt-3 flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => copyText(draft)}
-                    className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
-                  >
-                    下書きコピー
+                <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+                  <button type="button" onClick={generateOnce} disabled={generating} className={primaryBtn(!generating)}>
+                    {generating ? "鑑定中…" : "鑑定する（このページ）"}
                   </button>
-                  <span className="text-xs text-white/45">下の「鑑定する」は常時表示</span>
                 </div>
               </div>
 
               {/* 結果 */}
-              <div className="mt-4 rounded-2xl border border-white/10 bg-white/7 p-5">
-                <div className="text-xs font-semibold tracking-[0.18em] text-white/55">RESULT</div>
-                <div className="mt-2 text-lg font-semibold text-white">一時鑑定</div>
-                <div className="mt-1 text-sm text-white/55">必要ならこのあとChatへ。</div>
+              <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm sm:p-6">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-white/90">一時鑑定（結果）</div>
+                    <div className="mt-1 text-xs text-white/55">
+                      ここで終わりにもできます。補足疑問が出たらChatへ。
+                    </div>
+                  </div>
+                  {!resultText ? <span className="text-xs text-white/45">未生成</span> : null}
+                </div>
 
                 {!resultText ? (
-                  <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm text-white/65">
-                    （まだありません）
+                  <div className="mt-4 text-sm text-white/60">
+                    「鑑定する（このページ）」を押すと、ここに結果が出ます。
                   </div>
                 ) : (
                   <>
@@ -734,6 +756,7 @@ export default function NewPage() {
                       >
                         結果コピー
                       </button>
+
                       <button
                         type="button"
                         onClick={finishHere}
@@ -741,71 +764,28 @@ export default function NewPage() {
                       >
                         ここで終わり
                       </button>
+
                       <button
                         type="button"
                         onClick={goChatWithContext}
-                        className="rounded-xl border border-white/18 bg-white/14 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-white/18"
-                        disabled={!resultText}
+                        className="rounded-xl border border-white/15 bg-white/10 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-white/14"
                       >
                         補足がある→Chatへ
                       </button>
                     </div>
                   </>
                 )}
-              </div>
 
-              <div className="mt-5 text-xs text-white/55">private beta</div>
+                <div className="mt-5 flex items-center justify-between text-xs text-white/45">
+                  <span>Tarot Studio / private beta</span>
+                  <span>静かに、深く。</span>
+                </div>
+              </div>
             </section>
           </div>
+        </section>
 
-          {/* ✅ Footer（Welcomeと同型：下固定CTA） */}
-          <div className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#0B1020]/70 backdrop-blur-xl">
-            <div className="mx-auto max-w-6xl px-4 py-3 md:px-6">
-              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                <div className="flex flex-wrap items-center gap-2 text-xs text-white/70">
-                  <span className={chip(true)}>{scopeLabel(scope)}</span>
-                  <span className={chip(true)}>{deckKey}</span>
-                  <span className={chip(true)}>{spreadLabel}</span>
-                  <span className={chip(true)}>{toneLabel}</span>
-                  {generating ? <span className="text-white/45">※鑑定中…</span> : null}
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 md:flex md:items-center">
-                  <button
-                    type="button"
-                    onClick={generateOnce}
-                    disabled={!ready}
-                    className={clsx(
-                      "rounded-2xl border px-4 py-3 text-center text-sm font-semibold shadow-sm transition",
-                      ready
-                        ? "border-white/18 bg-white/14 text-white hover:bg-white/18"
-                        : "cursor-not-allowed border-white/8 bg-white/5 text-white/35"
-                    )}
-                  >
-                    {generating ? "鑑定中…" : "鑑定する"}
-                  </button>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <Link
-                      href="/read"
-                      className="rounded-2xl border border-white/12 bg-white/8 px-3 py-3 text-center text-xs font-semibold text-white/85 hover:bg-white/12"
-                    >
-                      相談履歴
-                    </Link>
-
-                    <Link
-                      href="/chat"
-                      className="rounded-2xl border border-white/12 bg-white/8 px-3 py-3 text-center text-xs font-semibold text-white/85 hover:bg-white/12"
-                    >
-                      つづき相談
-                    </Link>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-        </div>
+        <div className="h-10" />
       </div>
     </main>
   );
@@ -814,7 +794,7 @@ export default function NewPage() {
 function Stars() {
   return (
     <div
-      className="pointer-events-none absolute inset-0 opacity-70"
+      className="absolute inset-0 opacity-70"
       style={{
         backgroundImage:
           "radial-gradient(circle at 12% 18%, rgba(255,255,255,0.22) 0 1px, transparent 2px)," +

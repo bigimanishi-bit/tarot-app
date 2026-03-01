@@ -10,6 +10,22 @@ type DeckRow = {
   dictionary: string | null;
 };
 
+type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
+
+type WeatherPayload = {
+  locationLabel?: string | null;
+  weatherLabel?: string | null;
+  currentTempC?: number | null;
+  todayMaxC?: number | null;
+  todayMinC?: number | null;
+};
+
+type MoonPayload = {
+  ageDays?: number | null;
+  phaseLabel?: string | null;
+  pct?: number | null;
+};
+
 function getEnv(name: string) {
   const v = process.env[name];
   return v && v.trim() ? v : null;
@@ -29,8 +45,6 @@ function safeText(v: any) {
     return String(v ?? "");
   }
 }
-
-type ChatMessage = { role: "system" | "user" | "assistant"; content: string };
 
 function isDictionaryQuestion(q: string) {
   const s = (q ?? "").trim();
@@ -53,8 +67,108 @@ function isDictionaryQuestion(q: string) {
 
 function looksLikeThreeBullets(text: string) {
   const t = (text ?? "").trim();
-  // 1) 2) 3) が揃ってるか
   return /(^|\n)\s*1\)\s+/.test(t) && /(^|\n)\s*2\)\s+/.test(t) && /(^|\n)\s*3\)\s+/.test(t);
+}
+
+function short(s: string, n: number) {
+  const t = (s ?? "").replace(/\s+/g, " ").trim();
+  return t.length > n ? t.slice(0, n) + "…" : t;
+}
+
+async function fetchHistorySummary(admin: any, params: {
+  userId: string;
+  targetType?: "self" | "client" | null;
+  clientProfileId?: string | null;
+}) {
+  let q = admin
+    .from("readings")
+    .select("created_at,title,theme,result_text,target_type,client_profile_id")
+    .eq("user_id", params.userId)
+    .order("created_at", { ascending: false })
+    .limit(20);
+
+  if (params.targetType === "self") {
+    q = q.eq("target_type", "self");
+  }
+  if (params.targetType === "client") {
+    q = q.eq("target_type", "client");
+    if (params.clientProfileId) q = q.eq("client_profile_id", params.clientProfileId);
+  }
+
+  const { data, error } = await q;
+  if (error || !data) return { summary: null as string | null, count: 0 };
+
+  const rows = data as Array<{
+    created_at: string | null;
+    title: string | null;
+    theme: string | null;
+    result_text: string | null;
+  }>;
+
+  const use = rows.slice(0, 5);
+  const summary = use
+    .map((r, i) => {
+      const dt = r.created_at ? String(r.created_at).slice(0, 10) : "—";
+      const ttl = r.title ? short(r.title, 26) : "（無題）";
+      const th = r.theme ? short(r.theme, 36) : "";
+      const rs = r.result_text ? short(r.result_text, 120) : "";
+      const parts = [`${i + 1}. ${dt} ${ttl}`];
+      if (th) parts.push(`   - テーマ: ${th}`);
+      if (rs) parts.push(`   - 要旨: ${rs}`);
+      return parts.join("\n");
+    })
+    .join("\n");
+
+  return { summary, count: rows.length };
+}
+
+function buildContextLines(args: {
+  scopeLabel?: string | null;
+  initialReadingText?: string | null;
+  userBirthDate?: string | null;
+  clientBirthDate?: string | null;
+  weather?: WeatherPayload | null;
+  moon?: MoonPayload | null;
+  historySummary?: string | null;
+}) {
+  const lines: string[] = [];
+
+  if (args.scopeLabel) lines.push(`スコープ: ${args.scopeLabel}`);
+
+  if (args.userBirthDate) lines.push(`【生年月日（あなた）】${args.userBirthDate}`);
+  if (args.clientBirthDate) lines.push(`【生年月日（相談者）】${args.clientBirthDate}`);
+
+  if (args.weather) {
+    const w = args.weather;
+    const tempNow =
+      typeof w.currentTempC === "number" ? `${Math.round(w.currentTempC)}℃` : "—";
+    const max =
+      typeof w.todayMaxC === "number" ? `${Math.round(w.todayMaxC)}℃` : "—";
+    const min =
+      typeof w.todayMinC === "number" ? `${Math.round(w.todayMinC)}℃` : "—";
+    lines.push(
+      `【天気】${w.locationLabel ?? "—"} / ${w.weatherLabel ?? "—"} / いま${tempNow} 最高${max} 最低${min}`
+    );
+  }
+
+  if (args.moon) {
+    const m = args.moon;
+    const age = typeof m.ageDays === "number" ? m.ageDays.toFixed(1) : "—";
+    const pct = typeof m.pct === "number" ? `${m.pct}%` : "—";
+    lines.push(`【月】${m.phaseLabel ?? "—"} / 月齢${age}日 / 満ち具合${pct}`);
+  }
+
+  if (args.initialReadingText) {
+    lines.push("参考（Newの一時鑑定。背景として理解するだけ）：");
+    lines.push(args.initialReadingText);
+  }
+
+  if (args.historySummary) {
+    lines.push("参考（過去の鑑定の要約。決めつけに使わない）：");
+    lines.push(args.historySummary);
+  }
+
+  return lines;
 }
 
 export async function POST(req: Request) {
@@ -128,6 +242,14 @@ export async function POST(req: Request) {
     const initialReadingText =
       typeof body?.initialReadingText === "string" ? body.initialReadingText : null;
 
+    // ✅ scope情報（履歴の取得/保存に使う）
+    const targetType =
+      body?.targetType === "client" ? "client" : body?.targetType === "self" ? "self" : null;
+    const clientProfileId =
+      typeof body?.clientProfileId === "string" && body.clientProfileId.trim()
+        ? body.clientProfileId.trim()
+        : null;
+
     const wantDictionary = isDictionaryQuestion(question);
 
     // deck dictionary (only when needed)
@@ -140,6 +262,26 @@ export async function POST(req: Request) {
         .maybeSingle();
       deck = (data as DeckRow) ?? null;
     }
+
+    // ✅ 追加材料（任意）
+    const userBirthDate =
+      typeof body?.userBirthDate === "string" && body.userBirthDate.trim()
+        ? body.userBirthDate.trim()
+        : null;
+    const clientBirthDate =
+      typeof body?.clientBirthDate === "string" && body.clientBirthDate.trim()
+        ? body.clientBirthDate.trim()
+        : null;
+    const weather = (body?.weather ?? null) as WeatherPayload | null;
+    const moon = (body?.moon ?? null) as MoonPayload | null;
+
+    // ✅ 履歴要約（serverで取得）
+    const h = await fetchHistorySummary(admin, {
+      userId: user_id,
+      targetType,
+      clientProfileId,
+    });
+    const historySummary = h.summary;
 
     // OpenAI
     const apiKey = getEnv("OPENAI_API_KEY");
@@ -157,14 +299,27 @@ export async function POST(req: Request) {
           .map((m: any) => ({ role: m.role, content: safeText(m.content) }))
       : [];
 
-    const systemParts: string[] = [companionPrompt];
+    // ✅ 根底ルール（固定）
+    const foundation = [
+      "根底ルール（厳守）",
+      "タロットは相手の事実や内心を直接知る道具ではない。",
+      "タロットは、相談者の観察・記憶・身体感覚・潜在意識から『言葉』を引き出す道具。",
+      "第三者の内心・行動・所在・過去の出来事は断定しない（可能性の幅として述べる）。",
+      "材料（履歴/生年月日/天気/月）は“文脈”として扱い、決めつけの根拠にしない。",
+      "行動の指示はしない。相談者の気持ちを言語化し、整理し、落ち着ける返しを優先する。",
+    ].join("\n");
 
-    const ctxLines: string[] = [];
-    if (scopeLabel) ctxLines.push(`スコープ: ${scopeLabel}`);
-    if (initialReadingText) {
-      ctxLines.push("参考（Newの一時鑑定結果。背景として理解するだけ）：");
-      ctxLines.push(initialReadingText);
-    }
+    const systemParts: string[] = [companionPrompt, foundation];
+
+    const ctxLines = buildContextLines({
+      scopeLabel,
+      initialReadingText,
+      userBirthDate,
+      clientBirthDate,
+      weather,
+      moon,
+      historySummary,
+    });
     if (ctxLines.length) systemParts.push(ctxLines.join("\n"));
 
     if (wantDictionary) {
@@ -193,7 +348,7 @@ export async function POST(req: Request) {
 
     let out = (first.choices?.[0]?.message?.content ?? "").trim();
 
-    // ✅ リトライ：恋愛/相手の気持ち系で、3つ仮説が出てない・前置きが長い時に締める
+    // retry（必要な時だけ）
     if (!wantDictionary && !looksLikeThreeBullets(out)) {
       const tighten: ChatMessage[] = [
         ...baseMessages,
@@ -203,7 +358,7 @@ export async function POST(req: Request) {
             "出力を短く整形して。次の形式だけで返して：\n" +
             "1) 可能性（1〜2文）\n2) 可能性（1〜2文）\n3) 可能性（1〜2文）\n" +
             "最後に共感の一文だけ。\n" +
-            "前置きや同語反復は禁止。",
+            "前置きや同語反復は禁止。断定は禁止。",
         },
       ];
 
@@ -220,10 +375,14 @@ export async function POST(req: Request) {
 
     if (!out) return NextResponse.json({ error: "No output" }, { status: 500 });
 
+    // ✅ readings保存（履歴として使うので target_type / client_profile_id を入れる）
     await admin.from("readings").insert({
       user_id,
       theme: typeof body?.theme === "string" ? body.theme : null,
       title: typeof body?.title === "string" ? body.title : null,
+      mode: wantDictionary ? "dictionary" : "chat",
+      target_type: targetType,
+      client_profile_id: targetType === "client" ? clientProfileId : null,
       cards_text: safeText({
         scopeLabel,
         deckKey,
@@ -231,11 +390,27 @@ export async function POST(req: Request) {
         question,
         messagesCount: history.length,
         hasInitialReadingText: !!initialReadingText,
+        userBirthDate,
+        clientBirthDate,
+        weather,
+        moon,
+        historyCount: h.count,
       }),
       result_text: out,
     });
 
-    return NextResponse.json({ readingText: out });
+    return NextResponse.json({
+      readingText: out,
+      meta: {
+        historyCount: h.count,
+        used: {
+          userBirthDate: !!userBirthDate,
+          clientBirthDate: !!clientBirthDate,
+          weather: !!weather,
+          moon: !!moon,
+        },
+      },
+    });
   } catch (e: any) {
     return NextResponse.json(
       { error: e?.message ? String(e.message) : "server_error" },

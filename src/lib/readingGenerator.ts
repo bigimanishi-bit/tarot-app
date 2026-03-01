@@ -39,6 +39,20 @@ type GenerateInput = {
   tone?: ToneKey | string;
 };
 
+const EXTRA_MARK = "---\n[鑑定に使う追加情報]";
+
+function splitCardsAndExtra(raw: string) {
+  const s = (raw ?? "").trim();
+  if (!s) return { cardsPart: "", extraPart: "" };
+
+  const idx = s.indexOf(EXTRA_MARK);
+  if (idx === -1) return { cardsPart: s, extraPart: "" };
+
+  const cardsPart = s.slice(0, idx).trim();
+  const extraPart = s.slice(idx).trim();
+  return { cardsPart, extraPart };
+}
+
 function tokenToCardLabel(t: string) {
   const s = t.trim();
   const m = s.match(/^([0-9]{1,2})$/);
@@ -56,10 +70,13 @@ function normalizeCardsText(raw: string) {
     );
 
   if (hasRole) {
-    const normalized = s.replace(/(^|\s)([0-9]{1,2})(?=\s|$)/g, (all, p1, num) => {
-      const name = MAJOR_MAP[num];
-      return name ? `${p1}${name}` : all;
-    });
+    const normalized = s.replace(
+      /(^|\s)([0-9]{1,2})(?=\s|$)/g,
+      (all, p1, num) => {
+        const name = MAJOR_MAP[num];
+        return name ? `${p1}${name}` : all;
+      }
+    );
     return { spread: "role_based", normalized };
   }
 
@@ -71,9 +88,13 @@ function normalizeCardsText(raw: string) {
     .filter(Boolean)
     .map(tokenToCardLabel);
 
-  if (tokens.length === 1) return { spread: "1card_default", normalized: `カード：${tokens[0]}` };
+  if (tokens.length === 1)
+    return { spread: "1card_default", normalized: `カード：${tokens[0]}` };
   if (tokens.length === 3)
-    return { spread: "3cards_default", normalized: `現状：${tokens[0]}\n課題：${tokens[1]}\n助言：${tokens[2]}` };
+    return {
+      spread: "3cards_default",
+      normalized: `現状：${tokens[0]}\n課題：${tokens[1]}\n助言：${tokens[2]}`,
+    };
   if (tokens.length === 5)
     return {
       spread: "5cards_default",
@@ -92,8 +113,28 @@ function stripCardNamesSafely(text: string) {
   if (!text) return text;
 
   const majors = [
-    "愚者","魔術師","女教皇","女帝","皇帝","教皇","恋人","戦車","力","隠者","運命の輪","正義",
-    "吊るされた男","死神","節制","悪魔","塔","星","月","太陽","審判","世界"
+    "愚者",
+    "魔術師",
+    "女教皇",
+    "女帝",
+    "皇帝",
+    "教皇",
+    "恋人",
+    "戦車",
+    "力",
+    "隠者",
+    "運命の輪",
+    "正義",
+    "吊るされた男",
+    "死神",
+    "節制",
+    "悪魔",
+    "塔",
+    "星",
+    "月",
+    "太陽",
+    "審判",
+    "世界",
   ];
 
   const boundary = (w: string) =>
@@ -130,10 +171,25 @@ export async function generateReadingText(input: GenerateInput) {
   if (!apiKey) throw new Error("OPENAI_API_KEY is missing");
 
   const client = new OpenAI({ apiKey });
-  const parsed = normalizeCardsText(input.cards_text);
+
+  // ✅ cards_text から「カード入力」と「追加情報」を分離（混ぜない）
+  const split = splitCardsAndExtra(input.cards_text);
+  const parsed = normalizeCardsText(split.cardsPart);
   const wantScenarios = needsSilenceScenarios(parsed.normalized);
 
+  // ✅ 根底ルール（固定）
+  const foundationHint = [
+    "鑑定の根底ルール（厳守）",
+    "タロットは相手の事実や内心を直接知る道具ではない。",
+    "タロットは、相談者の観察・記憶・身体感覚・潜在意識から『言葉』を引き出す道具。",
+    "第三者の内心・行動・所在・過去の出来事は断定しない（可能性の幅として述べる）。",
+    "『当たっている前提』で語らず、言語化と整理を目的にする。",
+    "追加情報（履歴/生年月日/天気/月）は“文脈”として扱い、決めつけの根拠にしない。",
+  ].join("\n");
+
   const normalHint = [
+    foundationHint,
+    "",
     "あなたは通常鑑定モード。",
     "本文でカード名を一切出さない（カード名ゼロ）。番号列も出さない。",
     "入力にある具体（既読/留守電など）を必ず使う。一般論で埋めない。",
@@ -164,6 +220,8 @@ export async function generateReadingText(input: GenerateInput) {
     .join("\n");
 
   const dictHint = [
+    foundationHint,
+    "",
     "あなたは📚辞書モード。",
     "カード名の使用OK。",
     "カードごとに『核／出やすい現れ方／注意』を短く。",
@@ -182,6 +240,8 @@ export async function generateReadingText(input: GenerateInput) {
     `スプレッド: ${parsed.spread}`,
     `カード/入力:`,
     parsed.normalized,
+    split.extraPart ? "\n追加情報（参考・決めつけに使わない）:" : "",
+    split.extraPart ? split.extraPart : "",
   ]
     .filter(Boolean)
     .join("\n");
