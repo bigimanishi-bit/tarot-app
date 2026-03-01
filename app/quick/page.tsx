@@ -164,7 +164,7 @@ export default function QuickPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           theme,
-          title: "AI",
+          title: "AI占い鑑定室",
           mode: "normal",
           cardsText: buildCardsText() + guard,
         }),
@@ -267,7 +267,7 @@ export default function QuickPage() {
       <div className="relative mx-auto max-w-6xl px-4 py-6 pb-28 md:px-6 md:py-10 md:pb-32">
         <header className="mb-4">
           <h1 className="text-3xl tracking-tight text-white md:text-5xl">AI</h1>
-          <div className="mt-1 text-xs text-white/55">入れ物：{scopeLabel(scope)}</div>
+          <div className="mt-1 text-xs text-white/55">選択：{scopeLabel(scope)}</div>
         </header>
 
         {err ? (
@@ -301,7 +301,7 @@ export default function QuickPage() {
                   </div>
 
                   <div>
-                    <div className="mb-2 text-xs font-semibold text-white/70">話し方</div>
+                    <div className="mb-2 text-xs font-semibold text-white/70">鑑定強度</div>
                     <select value={tone} onChange={(e) => setTone(e.target.value as ToneKey)} className={selectClass}>
                       <option value="warm">やわらかめ</option>
                       <option value="neutral">ふつう</option>
@@ -314,7 +314,7 @@ export default function QuickPage() {
                     onClick={drawCards}
                     className="w-full rounded-2xl border border-white/15 bg-white/10 px-4 py-3 text-sm font-semibold text-white shadow-sm hover:bg-white/14"
                   >
-                    引く
+                    カードを選ぶ
                   </button>
                 </div>
               </div>
@@ -342,7 +342,7 @@ export default function QuickPage() {
                     onChange={(e) => setQuestion(e.target.value)}
                     rows={4}
                     className="w-full resize-none rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm leading-7 text-white/90 shadow-sm outline-none placeholder:text-white/35 focus:border-white/20"
-                    placeholder="例：既読にならない。留守電を入れた。待つのがしんどい。"
+                    placeholder="例：今日は流れを良くしたい。いま何を意識するといい？／恋愛で一歩進めたい"
                   />
                 </div>
               </div>
@@ -366,13 +366,13 @@ export default function QuickPage() {
                       onClick={drawCards}
                       className="rounded-xl border border-white/12 bg-white/8 px-3 py-2 text-xs font-semibold text-white/85 hover:bg-white/12"
                     >
-                      引き直す
+                      選び直す
                     </button>
                   </div>
                 </div>
 
                 {!cards ? (
-                  <div className="mt-4 text-sm text-white/60">「引く」でカードが出ます</div>
+                  <div className="mt-4 text-sm text-white/60">「カードを選ぶ」でカードが出ます</div>
                 ) : (
                   <div className={clsx("mt-4 grid gap-3", cards.length === 1 ? "grid-cols-1" : "grid-cols-3")}>
                     {cards.map((name, i) => (
@@ -396,7 +396,7 @@ export default function QuickPage() {
 
               <div className="rounded-2xl border border-white/10 bg-white/7 p-5 shadow-sm sm:p-6">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="text-sm font-semibold text-white/90">結果</div>
+                  <div className="text-sm font-semibold text-white/90">鑑定結果</div>
                   {resultText ? (
                     <button
                       type="button"
@@ -436,7 +436,7 @@ export default function QuickPage() {
                   : "border-white/18 bg-white/14 text-white hover:bg-white/18"
               )}
             >
-              {generating ? "鑑定中…" : "鑑定"}
+              {generating ? "鑑定中…" : "鑑定する"}
             </button>
 
             <Link
