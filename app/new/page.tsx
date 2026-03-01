@@ -8,6 +8,7 @@ import { supabase } from "@/lib/supabaseClient";
 import { loadScope, isScopeReady, scopeLabel, type TarotScope } from "@/lib/scope";
 
 type ToneKey = "warm" | "neutral" | "direct";
+type LengthPreset = "short" | "normal" | "deep";
 type SpreadKey =
   | "one_card"
   | "two_choices"
@@ -87,7 +88,12 @@ const PRESETS = [
   },
 ];
 
-type GenerateOk = { ok: true; text: string; prompt_updated_at?: string | null; reading_id?: string | null };
+type GenerateOk = {
+  ok: true;
+  text: string;
+  prompt_updated_at?: string | null;
+  reading_id?: string | null;
+};
 type GenerateNg = { ok: false; message?: string };
 type GenerateResp = GenerateOk | GenerateNg;
 
@@ -195,6 +201,12 @@ function clsx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(" ");
 }
 
+function lengthLabel(p: LengthPreset) {
+  if (p === "short") return "短め";
+  if (p === "deep") return "深掘り";
+  return "ふつう";
+}
+
 export default function NewPage() {
   const router = useRouter();
 
@@ -209,8 +221,14 @@ export default function NewPage() {
   const [spread, setSpread] = useState<SpreadKey>("five_feelings");
   const [tone, setTone] = useState<ToneKey>("direct");
 
+  // ✅ 追加：文字数プリセット
+  const [lengthPreset, setLengthPreset] = useState<LengthPreset>("normal");
+
   const [presetKey, setPresetKey] = useState(PRESETS[0].key);
-  const preset = useMemo(() => PRESETS.find((p) => p.key === presetKey) ?? PRESETS[0], [presetKey]);
+  const preset = useMemo(
+    () => PRESETS.find((p) => p.key === presetKey) ?? PRESETS[0],
+    [presetKey]
+  );
 
   const [draft, setDraft] = useState(preset.text);
   const [err, setErr] = useState<string | null>(null);
@@ -222,10 +240,16 @@ export default function NewPage() {
   const [userBirthDate, setUserBirthDate] = useState<string | null>(null);
   const [clientBirthDate, setClientBirthDate] = useState<string | null>(null);
   const [weather, setWeather] = useState<WeatherPayload | null>(null);
-  const [moon, setMoon] = useState<{ ageDays: number; phaseLabel: string; pct: number } | null>(null);
+  const [moon, setMoon] = useState<{ ageDays: number; phaseLabel: string; pct: number } | null>(
+    null
+  );
 
-  const spreadLabel = useMemo(() => SPREADS.find((s) => s.key === spread)?.label ?? spread, [spread]);
-  const toneLabel = tone === "warm" ? "やわらかめ" : tone === "neutral" ? "ニュートラル" : "はっきり";
+  const spreadLabel = useMemo(
+    () => SPREADS.find((s) => s.key === spread)?.label ?? spread,
+    [spread]
+  );
+  const toneLabel =
+    tone === "warm" ? "やわらかめ" : tone === "neutral" ? "ニュートラル" : "はっきり";
 
   useEffect(() => {
     setDraft(preset.text);
@@ -291,7 +315,10 @@ export default function NewPage() {
       setUserEmail(email);
       setCheckingAuth(false);
 
-      const { data: deckRows } = await supabase.from("deck_library").select("key, name").order("name", { ascending: true });
+      const { data: deckRows } = await supabase
+        .from("deck_library")
+        .select("key, name")
+        .order("name", { ascending: true });
       const list = (deckRows ?? []) as DeckRow[];
       setDecks(list);
 
@@ -419,7 +446,7 @@ export default function NewPage() {
 
     try {
       const theme = scopeLabel(scope);
-      const title = `New / ${deckKey} / ${spreadLabel} / ${toneLabel}`;
+      const title = `New / ${deckKey} / ${spreadLabel} / ${toneLabel} / ${lengthLabel(lengthPreset)}`;
       const guard = "\n\n【ルール】AIはユーザーに追加質問をしない。鑑定文だけで完結させる。";
 
       const res = await fetch("/api/generate", {
@@ -432,6 +459,7 @@ export default function NewPage() {
           deckKey,
           spreadKey: spread,
           tone,
+          lengthPreset, // ✅ 追加
           cardsText: String(draft ?? "") + guard,
 
           userId,
@@ -491,7 +519,7 @@ export default function NewPage() {
       on ? "border-white/18 bg-white/12 text-white" : "border-white/10 bg-white/6 text-white/60"
     );
 
-  const ready = !generating; // 下固定CTAは常時表示。押せないのは generating 中だけ。
+  const ready = !generating;
 
   const selectBase =
     "w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/90 shadow-sm outline-none focus:border-white/20";
@@ -514,12 +542,13 @@ export default function NewPage() {
 
   return (
     <main className="min-h-screen">
-      {/* ✅ layout触らず option白問題を潰す（このページだけ） */}
       <style jsx global>{`
-        select { color-scheme: dark; }
+        select {
+          color-scheme: dark;
+        }
         select option {
           background: #0b1020 !important;
-          color: rgba(255,255,255,0.92) !important;
+          color: rgba(255, 255, 255, 0.92) !important;
         }
       `}</style>
 
@@ -535,7 +564,6 @@ export default function NewPage() {
         />
         <Stars />
 
-        {/* ✅ Header（Welcomeと同型） */}
         <div className="sticky top-0 z-40 border-b border-white/10 bg-[#0B1020]/55 backdrop-blur-xl">
           <div className="mx-auto max-w-6xl px-4 py-3 md:px-6">
             <div className="flex items-center justify-between gap-3">
@@ -570,7 +598,6 @@ export default function NewPage() {
           </div>
         </div>
 
-        {/* ✅ Footerぶん余白 */}
         <div className="relative mx-auto max-w-6xl px-4 py-7 pb-28 md:px-6 md:py-10 md:pb-32">
           {err ? (
             <div className="mb-4 rounded-2xl border border-rose-300/20 bg-rose-500/10 px-5 py-4 text-sm text-rose-100">
@@ -629,7 +656,11 @@ export default function NewPage() {
 
                       <div>
                         <div className="mb-2 text-xs font-semibold text-white/70">スプレッド</div>
-                        <select value={spread} onChange={(e) => setSpread(e.target.value as SpreadKey)} className={selectBase}>
+                        <select
+                          value={spread}
+                          onChange={(e) => setSpread(e.target.value as SpreadKey)}
+                          className={selectBase}
+                        >
                           {SPREADS.map((s) => (
                             <option key={s.key} value={s.key}>
                               {s.label}
@@ -647,8 +678,23 @@ export default function NewPage() {
                         </select>
                       </div>
 
+                      {/* ✅ 追加：鑑定文量 */}
+                      <div>
+                        <div className="mb-2 text-xs font-semibold text-white/70">鑑定文量</div>
+                        <select
+                          value={lengthPreset}
+                          onChange={(e) => setLengthPreset(e.target.value as LengthPreset)}
+                          className={selectBase}
+                        >
+                          <option value="short">短め</option>
+                          <option value="normal">ふつう</option>
+                          <option value="deep">深掘り</option>
+                        </select>
+                      </div>
+
                       <div className="text-xs text-white/55">
-                        材料：生年月日 {userBirthDate ? "✓" : "—"} / 天気 {weather ? "✓" : "—"} / 月 {moon ? "✓" : "—"}
+                        材料：生年月日 {userBirthDate ? "✓" : "—"} / 天気 {weather ? "✓" : "—"} / 月{" "}
+                        {moon ? "✓" : "—"}
                       </div>
                     </div>
                   </div>
@@ -659,14 +705,18 @@ export default function NewPage() {
             </aside>
 
             {/* RIGHT */}
-            <section className={clsx("rounded-[26px] border border-white/12 bg-white/6 p-4 shadow-[0_30px_110px_rgba(0,0,0,0.55)] backdrop-blur-2xl md:p-6")}>
-              {/* ✅ 何を選んだか常に分かる（Welcome寄せ） */}
+            <section
+              className={clsx(
+                "rounded-[26px] border border-white/12 bg-white/6 p-4 shadow-[0_30px_110px_rgba(0,0,0,0.55)] backdrop-blur-2xl md:p-6"
+              )}
+            >
               <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/10 bg-white/6 px-4 py-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={chip(true)}>入れ物：{scopeLabel(scope)}</span>
                   <span className={chip(true)}>デッキ：{deckKey}</span>
                   <span className={chip(true)}>スプレッド：{spreadLabel}</span>
                   <span className={chip(true)}>トーン：{toneLabel}</span>
+                  <span className={chip(true)}>鑑定文量：{lengthLabel(lengthPreset)}</span>
                 </div>
 
                 <button
@@ -682,7 +732,6 @@ export default function NewPage() {
                 </button>
               </div>
 
-              {/* 相談 */}
               <div className="rounded-2xl border border-white/10 bg-white/7 p-5">
                 <div className="text-xs font-semibold tracking-[0.18em] text-white/55">INPUT</div>
                 <div className="mt-2 text-lg font-semibold text-white">相談文</div>
@@ -710,7 +759,6 @@ export default function NewPage() {
                 </div>
               </div>
 
-              {/* 結果 */}
               <div className="mt-4 rounded-2xl border border-white/10 bg-white/7 p-5">
                 <div className="text-xs font-semibold tracking-[0.18em] text-white/55">RESULT</div>
                 <div className="mt-2 text-lg font-semibold text-white">一時鑑定</div>
@@ -758,7 +806,6 @@ export default function NewPage() {
             </section>
           </div>
 
-          {/* ✅ Footer（Welcomeと同型：下固定CTA） */}
           <div className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#0B1020]/70 backdrop-blur-xl">
             <div className="mx-auto max-w-6xl px-4 py-3 md:px-6">
               <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -767,6 +814,7 @@ export default function NewPage() {
                   <span className={chip(true)}>{deckKey}</span>
                   <span className={chip(true)}>{spreadLabel}</span>
                   <span className={chip(true)}>{toneLabel}</span>
+                  <span className={chip(true)}>{lengthLabel(lengthPreset)}</span>
                   {generating ? <span className="text-white/45">※鑑定中…</span> : null}
                 </div>
 
@@ -797,7 +845,7 @@ export default function NewPage() {
                       href="/chat"
                       className="rounded-2xl border border-white/12 bg-white/8 px-3 py-3 text-center text-xs font-semibold text-white/85 hover:bg-white/12"
                     >
-                      つづき相談
+                      AI対話相談
                     </Link>
                   </div>
                 </div>

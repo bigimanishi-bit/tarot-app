@@ -28,6 +28,7 @@ const MAJOR_MAP: Record<string, string> = {
 };
 
 type ToneKey = "warm" | "neutral" | "direct";
+type LengthPreset = "short" | "normal" | "deep";
 
 type GenerateInput = {
   theme: string;
@@ -37,6 +38,7 @@ type GenerateInput = {
   deck_key?: string;
   spread_key?: string;
   tone?: ToneKey | string;
+  length_preset?: LengthPreset;
 };
 
 const EXTRA_MARK = "---\n[鑑定に使う追加情報]";
@@ -88,8 +90,7 @@ function normalizeCardsText(raw: string) {
     .filter(Boolean)
     .map(tokenToCardLabel);
 
-  if (tokens.length === 1)
-    return { spread: "1card_default", normalized: `カード：${tokens[0]}` };
+  if (tokens.length === 1) return { spread: "1card_default", normalized: `カード：${tokens[0]}` };
   if (tokens.length === 3)
     return {
       spread: "3cards_default",
@@ -109,32 +110,13 @@ function normalizeCardsText(raw: string) {
   return { spread: "list", normalized: `並び：${tokens.join(" / ")}` };
 }
 
+// 通常鑑定ではカード名を出さない前提だが、万一混ざったら軽く伏せる（保険）
 function stripCardNamesSafely(text: string) {
   if (!text) return text;
 
   const majors = [
-    "愚者",
-    "魔術師",
-    "女教皇",
-    "女帝",
-    "皇帝",
-    "教皇",
-    "恋人",
-    "戦車",
-    "力",
-    "隠者",
-    "運命の輪",
-    "正義",
-    "吊るされた男",
-    "死神",
-    "節制",
-    "悪魔",
-    "塔",
-    "星",
-    "月",
-    "太陽",
-    "審判",
-    "世界",
+    "愚者","魔術師","女教皇","女帝","皇帝","教皇","恋人","戦車","力","隠者","運命の輪","正義",
+    "吊るされた男","死神","節制","悪魔","塔","星","月","太陽","審判","世界"
   ];
 
   const boundary = (w: string) =>
@@ -152,16 +134,67 @@ function stripCardNamesSafely(text: string) {
 }
 
 function toneHint(tone?: ToneKey | string) {
-  if (tone === "warm") return "口調はやわらかく、短文で安心感を優先。";
-  if (tone === "neutral") return "口調は落ち着いて整理。";
-  if (tone === "direct")
-    return "口調ははっきり。短文中心。『かもしれません』連発は禁止（最大2回）。";
+  if (tone === "warm") return "口調はやわらかく、責めずに事実をほどく。";
+  if (tone === "neutral") return "口調は落ち着いて中立。熱を上げすぎない。";
+  if (tone === "direct") return "口調ははっきり。短く言い切ってから理由を添える。";
   return "口調は自然で落ち着いて。";
 }
 
 function needsSilenceScenarios(inputText: string) {
   const s = inputText ?? "";
   return /(既読|未読|返信|返事|反応|留守電|電話|連絡|音沙汰)/.test(s);
+}
+
+function lengthSpec(preset?: LengthPreset) {
+  const p: LengthPreset = preset ?? "short";
+
+  // ✅ 尻切れ防止：max_tokensを大きく上げる
+  if (p === "deep") {
+    return {
+      preset: p,
+      maxTokens: 1600,
+      lengthLine: "全体は900〜1500字（最後の締め1行まで必ず到達）。",
+      paragraphLines: [
+        "続けて4段落（各2〜4文、見出しラベル禁止）：",
+        "段落1=状況の整理（Aの具体＋Bの情報を混ぜて整理）",
+        "段落2=相手/環境の動き（可能性3つ＋主仮説）",
+        "段落3=あなた側で一番削れているポイント（Aの言い回しで具体に）",
+        "段落4=この先の見通し（2パターンまで）",
+      ],
+      extraDeepRule:
+        "【深掘り必須】本文内で必ず3点を書く：①不安の芯（何が分からなくて苦しいかを1つ）②いちばん困っている場面（既読/留守電/調停などの具体）③削れるループ（待つ→想像→悪化 を具体語で）。",
+    };
+  }
+
+  if (p === "normal") {
+    return {
+      preset: p,
+      maxTokens: 1050,
+      lengthLine: "全体は520〜950字（最後の締め1行まで必ず到達）。",
+      paragraphLines: [
+        "続けて4段落（各2〜4文、見出しラベル禁止）：",
+        "段落1=状況の整理（Aの具体＋Bの情報を混ぜて整理）",
+        "段落2=相手/環境の動き（可能性3つ＋主仮説）",
+        "段落3=あなた側で一番削れているポイント（Aの言い回しで具体に）",
+        "段落4=この先の見通し（2パターンまで）",
+      ],
+      extraDeepRule: "",
+    };
+  }
+
+  return {
+    preset: p,
+    maxTokens: 700,
+    lengthLine: "全体は320〜620字（最後の締め1行まで必ず到達）。",
+    paragraphLines: [
+      "続けて4段落（各2〜4文、見出しラベル禁止）：",
+      "段落1=状況の整理（Aの具体＋Bの情報を混ぜて整理）",
+      "段落2=相手/環境の動き（可能性3つ＋主仮説）",
+      "段落3=あなた側で一番削れているポイント（Aの言い回しで具体に）",
+      "段落4=この先の見通し（2パターンまで）",
+    ],
+    extraDeepRule: "",
+  };
 }
 
 export async function generateReadingText(input: GenerateInput) {
@@ -172,89 +205,94 @@ export async function generateReadingText(input: GenerateInput) {
 
   const client = new OpenAI({ apiKey });
 
-  // ✅ cards_text から「カード入力」と「追加情報」を分離（混ぜない）
   const split = splitCardsAndExtra(input.cards_text);
   const parsed = normalizeCardsText(split.cardsPart);
   const wantScenarios = needsSilenceScenarios(parsed.normalized);
 
-  // ✅ 根底ルール（固定）
-  const foundationHint = [
-    "鑑定の根底ルール（厳守）",
-    "タロットは相手の事実や内心を直接知る道具ではない。",
-    "タロットは、相談者の観察・記憶・身体感覚・潜在意識から『言葉』を引き出す道具。",
-    "第三者の内心・行動・所在・過去の出来事は断定しない（可能性の幅として述べる）。",
-    "『当たっている前提』で語らず、言語化と整理を目的にする。",
-    "追加情報（履歴/生年月日/天気/月）は“文脈”として扱い、決めつけの根拠にしない。",
-  ].join("\n");
+  const len = lengthSpec(input.length_preset);
 
   const normalHint = [
-    foundationHint,
+    "あなたはベテランタロット占い師。",
+    "目的はカード説明ではなく、相談者の状況を“整理してわかる言葉”にして返すこと。",
     "",
-    "あなたは通常鑑定モード。",
-    "本文でカード名を一切出さない（カード名ゼロ）。番号列も出さない。",
-    "入力にある具体（既読/留守電など）を必ず使う。一般論で埋めない。",
-    "テンプレ語（心の整理/自己理解/見つめ直す）は禁止。具体語に言い換える。",
-    "見出し語・ラベルは禁止（例：事実/解釈/見通し/焦点/状況の整理 等）。",
+    "【必須】質問で返さない（追加質問禁止。文末『？』も禁止）。",
+    "【必須】タロットは相手の内心を直接断定する道具ではない。内心は断定せず『〜寄り』『〜の線が濃い』で述べる。",
+    "【必須】断定予言しない（傾向/可能性の範囲）。",
+    "【必須】本文でカード名を一切出さない（カード名ゼロ／略称ゼロ／番号列ゼロ）。",
+    "",
+    "【入力の扱い】A=相談文＋カード、B=---で囲われた[鑑定に使う追加情報]。必ずAとBの両方を読み、本文に反映する。",
+    "【追加情報の使い方】生年月日/天気/月/過去要約は“説明”ではなく状況整理に溶かす。各要素は1点だけ短く使う。",
+    "【数秘】Bに『【数秘】運命数（ライフパス）』があれば本文に必ず1回だけ触れる（1〜2文、決めつけ禁止、今回の苦しさの出方に接続）。",
+    "",
+    "【禁止語（強）】『心の整理』『自己理解』『見つめ直す』『前向き』『受け入れる』『モヤモヤ』『不安が続きそう』は禁止。必ず具体語に言い換える。",
+    "【禁止】『可能性が考えられます』は禁止。可能性は段落2で“第一に…第二に…第三に…”の形で出す。",
+    "【制限】『〜かもしれません』は合計2回まで。基本は『〜寄り』『〜になりやすい』『〜の線が濃い』で書く。",
+    "説教や一般論で埋めない。Aの具体（別居/既読なし/留守電/調停など）を必ず使う。",
     "同じ意味の言い換えで水増ししない。",
+    len.extraDeepRule ? len.extraDeepRule : "",
     "",
-    "出力ルール（固定）",
-    "冒頭は必ず3行。各1文。ラベルなし。箇条書き記号なし。",
-    "1行目=今起きていること（具体）",
-    "2行目=不安の焦点（何が分からなくて苦しいか）",
-    "3行目=当面の見立て（どうなりやすいか）",
-    "※3行は短く。各行25〜40字程度。",
+    "出力フォーマット（固定）",
+    "冒頭は必ず3行。各1文。番号表記1)2)3)はOK。箇条書き記号（・-）は禁止。",
+    "1) いま起きていること（Aの具体）",
+    "2) いちばん詰まっている点（何が分からなくて苦しいか）",
+    "3) この先の方向性（どうなりやすいか。断定しない）",
     "",
-    "その後は3段落：",
-    "段落A=状況の見立て（2〜4文）",
-    "段落B=相手/環境（断定しない、2〜4文）",
-    "段落C=あなた側で一番削れているポイント（2〜4文）",
+    ...len.paragraphLines,
     "",
+    "段落2の書き方（固定）：第一に…第二に…第三に…の3つ → 最後に主仮説を1つだけ短く述べる（断定はしないが逃げない）。",
     wantScenarios
-      ? "反応がない系の相談は、段落Bの中で相手側の可能性を3つ挙げる。『忙しい』の一言で逃げない（例：返すと話が進むのが怖い／読めない状態にして自分を守る／周囲や手続き都合で反応できない）。最後に主仮説を1つだけ述べる（断定はしないが逃げない）。"
+      ? "反応がない相談では、沈黙の理由を『怖さ／守り／外圧』のどれかに結びつけて具体化する。『忙しい』で逃げない。"
       : "",
     "最後は1行で締める：いま心が一番削れている一点を具体に言う（提案はしない）。",
-    "全体は300〜520字。",
+    len.lengthLine,
     toneHint(input.tone),
   ]
     .filter(Boolean)
     .join("\n");
 
   const dictHint = [
-    foundationHint,
-    "",
     "あなたは📚辞書モード。",
-    "カード名の使用OK。",
+    "辞書モードの時だけカード名の使用OK。",
+    "質問で返さない（追加質問禁止。文末『？』も禁止）。",
     "カードごとに『核／出やすい現れ方／注意』を短く。",
-    "最後に2〜3行だけ、今回の状況に当てはめたまとめ。",
+    "最後に2〜3行だけ今回への当てはめ（A/Bに接続）。",
     "600〜1100字目安。",
     toneHint(input.tone),
   ].join("\n");
 
   const modeHint = input.mode === "dictionary" ? dictHint : normalHint;
 
+  // userText：Bは“参考”じゃなく必須材料として渡す
   const userText = [
     `テーマ: ${input.theme}`,
     input.title ? `タイトル: ${input.title}` : "",
     input.tone ? `トーン: ${String(input.tone)}` : "",
     `モード: ${input.mode}`,
+    `長さ: ${len.preset}`,
     `スプレッド: ${parsed.spread}`,
-    `カード/入力:`,
+    "",
+    "A) 相談文＋カード（ユーザー入力）:",
     parsed.normalized,
-    split.extraPart ? "\n追加情報（参考・決めつけに使わない）:" : "",
+    split.extraPart ? "" : "",
+    split.extraPart ? "\nB) [鑑定に使う追加情報]（必ず本文に反映）:" : "",
     split.extraPart ? split.extraPart : "",
   ]
     .filter(Boolean)
     .join("\n");
 
+  const systemMaster =
+    (master as any)?.content != null ? String((master as any).content) : String(master ?? "");
+  const updatedAt = (master as any)?.updated_at ?? null;
+
   const res = await client.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
-      { role: "system", content: master.content },
+      { role: "system", content: systemMaster },
       { role: "system", content: modeHint },
       { role: "user", content: userText },
     ],
-    temperature: input.mode === "dictionary" ? 0.65 : 0.5,
-    max_tokens: input.mode === "dictionary" ? 950 : 420,
+    temperature: input.mode === "dictionary" ? 0.65 : 0.55,
+    max_tokens: input.mode === "dictionary" ? 1100 : len.maxTokens,
   });
 
   let text = res.choices?.[0]?.message?.content?.trim() ?? "";
@@ -262,5 +300,5 @@ export async function generateReadingText(input: GenerateInput) {
 
   if (input.mode === "normal") text = stripCardNamesSafely(text);
 
-  return { text, prompt_updated_at: master.updated_at };
+  return { text, prompt_updated_at: updatedAt };
 }
